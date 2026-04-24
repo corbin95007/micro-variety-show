@@ -1,0 +1,9 @@
+{
+  "name": "micro-variety-show",
+  "private": true,
+  "scripts": {
+    "dev": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "test": "vitest run"
+  }
+}
