@@ -1,7 +1,7 @@
 <template>
   <div class="result-list-page">
     <header class="list-header">
-      <button class="back-btn" @click="$router.back()">
+      <button type="button" class="back-btn" @click="$router.back()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       </button>
       <h1 class="list-title">{{ RL.pageTitle }}</h1>
@@ -16,7 +16,17 @@
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
       </svg>
       <p>登录后查看你的测试记录</p>
-      <button class="go-test-btn" @click="goLogin">去登录</button>
+      <button type="button" class="go-test-btn" @click="goLogin">去登录</button>
+    </div>
+
+    <div v-else-if="errorMessage" class="empty-state">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-muted)" stroke-width="1.2">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="0.6" fill="currentColor"/>
+      </svg>
+      <p>{{ errorMessage }}</p>
+      <button type="button" class="go-test-btn" @click="errorAction === 'login' ? goLogin() : loadResults()">
+        {{ errorAction === 'login' ? '去登录' : '重新加载' }}
+      </button>
     </div>
 
     <div v-else-if="!results.length" class="empty-state">
@@ -24,11 +34,12 @@
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
       </svg>
       <p>{{ RL.empty }}</p>
-      <button class="go-test-btn" @click="$router.push('/test')">{{ RL.goTest }}</button>
+      <button type="button" class="go-test-btn" @click="$router.push('/test')">{{ RL.goTest }}</button>
     </div>
 
     <div v-else class="results-list">
       <button
+        type="button"
         v-for="r in results"
         :key="r.id"
         class="result-item"
@@ -62,6 +73,8 @@ const router = useRouter()
 const auth = useAuthStore()
 const results = ref([])
 const loading = ref(true)
+const errorMessage = ref('')
+const errorAction = ref('retry')
 
 function formatDate(iso) {
   return new Date(iso).toLocaleString('zh-CN', {
@@ -73,26 +86,65 @@ function goLogin() {
   router.push({ path: '/login', query: { redirect: '/test/results' } })
 }
 
-onMounted(async () => {
+async function readErrorMessage(resp, fallback) {
+  const payload = await resp.json().catch(() => null)
+  return payload?.error || fallback
+}
+
+function formatLoadError(error, fallback) {
+  if (error instanceof TypeError) {
+    return import.meta.env.DEV
+      ? '本地 API 未启动，请先在项目根目录运行 npm run dev:api'
+      : '网络连接失败，请稍后再试'
+  }
+
+  return error instanceof Error ? error.message : fallback
+}
+
+async function loadResults() {
+  loading.value = true
+  errorMessage.value = ''
+  errorAction.value = 'retry'
+  results.value = []
+
   if (!auth.user) {
     loading.value = false
     return
   }
 
-  const token = (await supabase.auth.getSession()).data.session?.access_token
-  const resp = await fetch('/api/test/results', {
-    headers: { 'Authorization': `Bearer ${token}` },
-  })
+  try {
+    const { data: sessionData, error } = await supabase.auth.getSession()
+    if (error) throw error
 
-  if (resp.ok) {
-    const data = await resp.json()
-    results.value = Array.isArray(data) ? data : []
-  } else {
-    results.value = []
+    const token = sessionData.session?.access_token
+    if (!token) {
+      errorAction.value = 'login'
+      throw new Error('登录状态已失效，请重新登录')
+    }
+
+    const resp = await fetch('/api/test/results', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+
+    if (!resp.ok) {
+      if (resp.status === 401) {
+        errorAction.value = 'login'
+        throw new Error('登录状态已失效，请重新登录')
+      }
+
+      throw new Error(await readErrorMessage(resp, '测试结果列表加载失败，请稍后再试'))
+    }
+
+    const payload = await resp.json()
+    results.value = Array.isArray(payload) ? payload : []
+  } catch (error) {
+    errorMessage.value = formatLoadError(error, '测试结果列表加载失败，请稍后再试')
+  } finally {
+    loading.value = false
   }
+}
 
-  loading.value = false
-})
+onMounted(loadResults)
 </script>
 
 <style scoped>

@@ -1,7 +1,7 @@
 <template>
   <div class="quiz-page">
     <header class="quiz-header">
-      <button class="back-btn" @click="$router.back()">
+      <button type="button" class="back-btn" @click="$router.back()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       </button>
       <h1 class="quiz-title">{{ QUIZ_TEXT.pageTitle }}</h1>
@@ -21,7 +21,7 @@
         </div>
         <h2 class="guest-title">登录后开始测试</h2>
         <p class="guest-desc">为了保存答案和生成你的测试结果，这一页改为手动登录进入，不再自动弹出登录页。</p>
-        <button class="guest-login-btn" @click="goLogin">去登录</button>
+        <button type="button" class="guest-login-btn" @click="goLogin">去登录</button>
       </div>
     </div>
 
@@ -36,6 +36,7 @@
         <div class="q-text">{{ q.question_text }}</div>
         <div class="options-row">
           <button
+            type="button"
             v-for="opt in options"
             :key="opt.value"
             class="option-btn"
@@ -56,6 +57,7 @@
 
     <div v-if="auth.user" class="submit-section">
       <button
+        type="button"
         class="submit-btn"
         :class="{ 'is-ready': allAnswered }"
         :disabled="!allAnswered || submitting"

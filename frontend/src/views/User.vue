@@ -4,10 +4,10 @@
       <div class="user-header-bg"></div>
       <div class="user-header-content">
         <div class="header-top">
-          <button class="back-btn" @click="$router.back()">
+          <button type="button" class="back-btn" @click="$router.back()">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
-          <button v-if="auth.user" class="settings-entry" @click="router.push('/user/settings')">
+          <button type="button" v-if="auth.user" class="settings-entry" @click="router.push('/user/settings')">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2">
               <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.54V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.54 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.54-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.54-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.54V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.54 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.64.24 1.06.86 1.06 1.54V11a2 2 0 1 1 0 4h-.09c-.68 0-1.3.42-1.54 1Z"/>
             </svg>
@@ -35,7 +35,7 @@
               <span class="referral-count">{{ referralInfo.referral_count }} / {{ referralInfo.target }}</span>
             </div>
           </div>
-          <button class="copy-btn" @click="copyLink">
+          <button type="button" class="copy-btn" @click="copyLink">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
             </svg>
@@ -48,7 +48,7 @@
         <div class="info-card guest-card">
           <div class="guest-title">当前未登录</div>
           <p class="guest-desc">登录后可修改昵称和密码，也能复制你的专属邀请链接。</p>
-          <button class="guest-login-btn" @click="goLogin">去登录</button>
+          <button type="button" class="guest-login-btn" @click="goLogin">去登录</button>
         </div>
       </section>
 
@@ -62,11 +62,11 @@
             </div>
             <span class="payment-price">{{ U.paymentPrice }}</span>
           </div>
-          <button class="payment-btn" @click="handlePayment">{{ U.paymentBtn }}</button>
+          <button type="button" class="payment-btn" @click="handlePayment">{{ U.paymentBtn }}</button>
         </div>
       </section>
 
-      <button v-if="auth.user" class="logout-btn" @click="handleLogout">{{ U.logoutBtn }}</button>
+      <button type="button" v-if="auth.user" class="logout-btn" @click="handleLogout">{{ U.logoutBtn }}</button>
     </div>
   </div>
 </template>

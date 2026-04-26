@@ -1,7 +1,7 @@
 <template>
   <div class="result-page">
     <header class="result-header">
-      <button class="back-btn" @click="$router.back()">
+      <button type="button" class="back-btn" @click="$router.back()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       </button>
       <h1 class="result-title">{{ R.pageTitle }}</h1>
@@ -19,7 +19,7 @@
       </div>
       <h2 class="locked-title">请先登录</h2>
       <p class="locked-desc">登录后才能查看这份测试结果。</p>
-      <button class="unlock-btn" @click="goLogin">去登录</button>
+      <button type="button" class="unlock-btn" @click="goLogin">去登录</button>
     </div>
 
     <div v-else-if="errorMessage" class="locked-state">
@@ -30,7 +30,13 @@
       </div>
       <h2 class="locked-title">结果暂时不可用</h2>
       <p class="locked-desc">{{ errorMessage }}</p>
-      <button class="unlock-btn" @click="$router.push('/test/results')">返回列表</button>
+      <button
+        type="button"
+        class="unlock-btn"
+        @click="errorAction === 'login' ? goLogin() : errorAction === 'back' ? $router.push('/test/results') : loadResult()"
+      >
+        {{ errorAction === 'login' ? '去登录' : errorAction === 'back' ? '返回列表' : '重新加载' }}
+      </button>
     </div>
 
     <template v-else-if="result">
@@ -87,7 +93,7 @@
           </div>
           <h2 class="locked-title">{{ R.lockedTitle }}</h2>
           <p class="locked-desc">{{ R.lockedDesc }}</p>
-          <button class="unlock-btn" @click="$router.push('/user')">{{ R.unlockBtn }}</button>
+          <button type="button" class="unlock-btn" @click="$router.push('/user')">{{ R.unlockBtn }}</button>
         </div>
       </template>
     </template>
@@ -108,6 +114,7 @@ const auth = useAuthStore()
 const result = ref(null)
 const loading = ref(true)
 const errorMessage = ref('')
+const errorAction = ref('retry')
 const report = computed(() => result.value?.report || null)
 
 function goLogin() {
@@ -124,26 +131,69 @@ function formatDate(iso) {
   })
 }
 
-onMounted(async () => {
+async function readErrorMessage(resp, fallback) {
+  const payload = await resp.json().catch(() => null)
+  return payload?.error || fallback
+}
+
+function formatLoadError(error, fallback) {
+  if (error instanceof TypeError) {
+    return import.meta.env.DEV
+      ? '本地 API 未启动，请先在项目根目录运行 npm run dev:api'
+      : '网络连接失败，请稍后再试'
+  }
+
+  return error instanceof Error ? error.message : fallback
+}
+
+async function loadResult() {
+  loading.value = true
+  errorMessage.value = ''
+  errorAction.value = 'retry'
+  result.value = null
+
   if (!auth.user) {
     loading.value = false
     return
   }
 
-  const token = (await supabase.auth.getSession()).data.session?.access_token
-  const resp = await fetch(`/api/test/result/${route.params.id}`, {
-    headers: { 'Authorization': `Bearer ${token}` },
-  })
+  try {
+    const { data, error } = await supabase.auth.getSession()
+    if (error) throw error
 
-  if (resp.ok) {
+    const token = data.session?.access_token
+    if (!token) {
+      errorAction.value = 'login'
+      throw new Error('登录状态已失效，请重新登录')
+    }
+
+    const resp = await fetch(`/api/test/result/${route.params.id}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+
+    if (!resp.ok) {
+      if (resp.status === 401) {
+        errorAction.value = 'login'
+        throw new Error('登录状态已失效，请重新登录')
+      }
+
+      if (resp.status === 404) {
+        errorAction.value = 'back'
+        throw new Error('未找到这份测试结果')
+      }
+
+      throw new Error(await readErrorMessage(resp, '结果加载失败，请稍后再试'))
+    }
+
     result.value = await resp.json()
-  } else {
-    const error = await resp.json().catch(() => ({}))
-    errorMessage.value = error.error || '结果加载失败，请稍后再试'
+  } catch (error) {
+    errorMessage.value = formatLoadError(error, '结果加载失败，请稍后再试')
+  } finally {
+    loading.value = false
   }
+}
 
-  loading.value = false
-})
+onMounted(loadResult)
 </script>
 
 <style scoped>

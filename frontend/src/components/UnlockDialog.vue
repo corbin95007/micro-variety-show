@@ -12,8 +12,8 @@
         </div>
         <h3 class="dialog-title">{{ D.unlockedTitle }}</h3>
         <p class="dialog-desc">{{ D.unlockedDesc }}</p>
-        <button class="btn-primary" @click="goResult">{{ D.viewResultBtn }}</button>
-        <button class="btn-ghost" @click="goHome">{{ D.goHomeBtn }}</button>
+        <button type="button" class="btn-primary" @click="goResult">{{ D.viewResultBtn }}</button>
+        <button type="button" class="btn-ghost" @click="goHome">{{ D.goHomeBtn }}</button>
       </template>
 
       <template v-else>
@@ -35,8 +35,8 @@
             <span>{{ D.method2 }}</span>
           </div>
         </div>
-        <button class="btn-primary" @click="$router.push('/user'); visible = false">{{ D.unlockBtn }}</button>
-        <button class="btn-ghost" @click="goHome">{{ D.laterBtn }}</button>
+        <button type="button" class="btn-primary" @click="$router.push('/user'); visible = false">{{ D.unlockBtn }}</button>
+        <button type="button" class="btn-ghost" @click="goHome">{{ D.laterBtn }}</button>
       </template>
     </div>
   </van-overlay>

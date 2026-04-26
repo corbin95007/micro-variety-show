@@ -1,7 +1,7 @@
 <template>
   <div class="settings-page">
     <header class="settings-header">
-      <button class="back-btn" @click="$router.back()">
+      <button type="button" class="back-btn" @click="$router.back()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       </button>
       <h1 class="settings-title">账户设置</h1>
@@ -11,7 +11,7 @@
       <div class="empty-card">
         <div class="empty-title">当前未登录</div>
         <p class="empty-desc">登录后才能修改昵称和密码。</p>
-        <button class="primary-btn" @click="goLogin">去登录</button>
+        <button type="button" class="primary-btn" @click="goLogin">去登录</button>
       </div>
     </div>
 
@@ -24,7 +24,7 @@
               <div class="setting-title">当前昵称</div>
               <div class="setting-value">{{ auth.profile?.nickname || '未设置昵称' }}</div>
             </div>
-            <button class="setting-action" @click="openNicknameDialog">修改昵称</button>
+            <button type="button" class="setting-action" @click="openNicknameDialog">修改昵称</button>
           </div>
         </div>
       </section>
@@ -37,7 +37,7 @@
               <div class="setting-title">登录密码</div>
               <div class="setting-desc">修改后，下次请使用新密码登录。</div>
             </div>
-            <button class="setting-action" @click="openPasswordDialog">修改密码</button>
+            <button type="button" class="setting-action" @click="openPasswordDialog">修改密码</button>
           </div>
         </div>
       </section>

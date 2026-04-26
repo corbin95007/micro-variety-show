@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "cd frontend && npm run dev",
+    "dev:api": "powershell -ExecutionPolicy Bypass -File scripts/dev-api.ps1",
     "build": "cd frontend && npm run build",
     "test": "vitest run --pool threads",
     "import:question-bank": "powershell -ExecutionPolicy Bypass -File scripts/import-question-bank.ps1"
