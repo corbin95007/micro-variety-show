@@ -67,6 +67,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '../utils/supabase'
+import { formatRequestError, parseApiResponse } from '../utils/http'
 import { RESULT_LIST as RL } from '../constants'
 
 const router = useRouter()
@@ -84,21 +85,6 @@ function formatDate(iso) {
 
 function goLogin() {
   router.push({ path: '/login', query: { redirect: '/test/results' } })
-}
-
-async function readErrorMessage(resp, fallback) {
-  const payload = await resp.json().catch(() => null)
-  return payload?.error || fallback
-}
-
-function formatLoadError(error, fallback) {
-  if (error instanceof TypeError) {
-    return import.meta.env.DEV
-      ? '本地 API 未启动，请先在项目根目录运行 npm run dev:api'
-      : '网络连接失败，请稍后再试'
-  }
-
-  return error instanceof Error ? error.message : fallback
 }
 
 async function loadResults() {
@@ -126,19 +112,17 @@ async function loadResults() {
       headers: { 'Authorization': `Bearer ${token}` },
     })
 
-    if (!resp.ok) {
-      if (resp.status === 401) {
-        errorAction.value = 'login'
-        throw new Error('登录状态已失效，请重新登录')
-      }
-
-      throw new Error(await readErrorMessage(resp, '测试结果列表加载失败，请稍后再试'))
-    }
-
-    const payload = await resp.json()
+    const payload = await parseApiResponse(resp, {
+      fallbackMessage: '测试结果列表加载失败，请稍后再试',
+      unauthorizedMessage: '登录状态已失效，请重新登录',
+    })
     results.value = Array.isArray(payload) ? payload : []
   } catch (error) {
-    errorMessage.value = formatLoadError(error, '测试结果列表加载失败，请稍后再试')
+    if (error instanceof Error && error.message === '登录状态已失效，请重新登录') {
+      errorAction.value = 'login'
+    }
+
+    errorMessage.value = formatRequestError(error, '测试结果列表加载失败，请稍后再试')
   } finally {
     loading.value = false
   }

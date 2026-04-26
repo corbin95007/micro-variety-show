@@ -105,6 +105,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '../utils/supabase'
+import { formatRequestError, parseApiResponse } from '../utils/http'
 import SpectrumBar from '../components/SpectrumBar.vue'
 import { RESULT as R } from '../constants'
 
@@ -129,21 +130,6 @@ function formatDate(iso) {
     hour: '2-digit',
     minute: '2-digit',
   })
-}
-
-async function readErrorMessage(resp, fallback) {
-  const payload = await resp.json().catch(() => null)
-  return payload?.error || fallback
-}
-
-function formatLoadError(error, fallback) {
-  if (error instanceof TypeError) {
-    return import.meta.env.DEV
-      ? '本地 API 未启动，请先在项目根目录运行 npm run dev:api'
-      : '网络连接失败，请稍后再试'
-  }
-
-  return error instanceof Error ? error.message : fallback
 }
 
 async function loadResult() {
@@ -171,23 +157,21 @@ async function loadResult() {
       headers: { 'Authorization': `Bearer ${token}` },
     })
 
-    if (!resp.ok) {
-      if (resp.status === 401) {
+    result.value = await parseApiResponse(resp, {
+      fallbackMessage: '结果加载失败，请稍后再试',
+      unauthorizedMessage: '登录状态已失效，请重新登录',
+      notFoundMessage: '未找到这份测试结果',
+    })
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === '登录状态已失效，请重新登录') {
         errorAction.value = 'login'
-        throw new Error('登录状态已失效，请重新登录')
-      }
-
-      if (resp.status === 404) {
+      } else if (error.message === '未找到这份测试结果') {
         errorAction.value = 'back'
-        throw new Error('未找到这份测试结果')
       }
-
-      throw new Error(await readErrorMessage(resp, '结果加载失败，请稍后再试'))
     }
 
-    result.value = await resp.json()
-  } catch (error) {
-    errorMessage.value = formatLoadError(error, '结果加载失败，请稍后再试')
+    errorMessage.value = formatRequestError(error, '结果加载失败，请稍后再试')
   } finally {
     loading.value = false
   }

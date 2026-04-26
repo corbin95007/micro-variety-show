@@ -79,6 +79,7 @@ import { showToast } from 'vant'
 import { useAuthStore } from '../stores/auth'
 import { useTestStore } from '../stores/test'
 import { supabase } from '../utils/supabase'
+import { formatRequestError, parseApiResponse } from '../utils/http'
 import UnlockDialog from '../components/UnlockDialog.vue'
 import { QUIZ as QUIZ_TEXT } from '../constants'
 
@@ -123,11 +124,10 @@ async function handleSubmit() {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ answers: testStore.answers }),
     })
-    if (!resp.ok) {
-      const error = await resp.json().catch(() => ({}))
-      throw new Error(error.error || '提交失败')
-    }
-    const result = await resp.json()
+    const result = await parseApiResponse(resp, {
+      fallbackMessage: '提交失败',
+      unauthorizedMessage: '登录状态已失效，请重新登录',
+    })
     resultId.value = result.id
 
     const unlockResp = await fetch('/api/unlock/check', {
@@ -135,15 +135,14 @@ async function handleSubmit() {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ result_id: result.id }),
     })
-    if (!unlockResp.ok) {
-      const error = await unlockResp.json().catch(() => ({}))
-      throw new Error(error.error || '解锁状态获取失败')
-    }
-    const unlockData = await unlockResp.json()
+    const unlockData = await parseApiResponse(unlockResp, {
+      fallbackMessage: '解锁状态获取失败',
+      unauthorizedMessage: '登录状态已失效，请重新登录',
+    })
     unlocked.value = unlockData.unlocked
     showDialog.value = true
   } catch (error) {
-    showToast({ message: error.message || '提交失败', position: 'bottom' })
+    showToast({ message: formatRequestError(error, '提交失败'), position: 'bottom' })
   } finally {
     submitting.value = false
   }

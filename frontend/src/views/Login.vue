@@ -45,6 +45,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { formatRequestError, parseApiResponse } from '../utils/http'
 import { showToast } from 'vant'
 import { LOGIN as L } from '../constants'
 
@@ -68,16 +69,20 @@ async function handleSubmit() {
       await auth.register(email.value, password.value, nickname.value)
       if (inviteCode.value) {
         const token = (await import('../utils/supabase').then(m => m.supabase.auth.getSession())).data.session?.access_token
-        await fetch('/api/referral/track', {
+        const resp = await fetch('/api/referral/track', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({ invite_code: inviteCode.value })
+        })
+        await parseApiResponse(resp, {
+          fallbackMessage: '邀请码提交失败，请稍后再试',
+          unauthorizedMessage: '登录状态已失效，请重新登录',
         })
       }
     }
     router.push(route.query.redirect || '/')
   } catch (e) {
-    showToast({ message: e.message, position: 'bottom' })
+    showToast({ message: formatRequestError(e, '登录失败，请稍后再试'), position: 'bottom' })
   } finally {
     submitting.value = false
   }

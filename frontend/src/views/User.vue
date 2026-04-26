@@ -76,6 +76,7 @@ import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '../utils/supabase'
+import { parseApiResponse } from '../utils/http'
 import { showToast } from 'vant'
 import { USER as U, TOAST } from '../constants'
 
@@ -97,9 +98,10 @@ watch(
         headers: { 'Authorization': `Bearer ${token}` },
       })
 
-      if (resp.ok) {
-        referralInfo.value = await resp.json()
-      }
+      referralInfo.value = await parseApiResponse(resp, {
+        fallbackMessage: '邀请信息加载失败，请稍后再试',
+        unauthorizedMessage: '登录状态已失效，请重新登录',
+      })
     } catch {
       referralInfo.value = { invite_code: '', referral_count: 0, target: 3 }
     }

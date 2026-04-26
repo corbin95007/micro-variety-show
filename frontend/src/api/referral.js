@@ -1,4 +1,5 @@
 import { supabase } from '../utils/supabase'
+import { parseApiResponse } from '../utils/http'
 
 export async function getReferralInfo() {
   const { data: { session } } = await supabase.auth.getSession()
@@ -7,7 +8,10 @@ export async function getReferralInfo() {
       'Authorization': `Bearer ${session?.access_token}`
     }
   })
-  return res.json()
+  return parseApiResponse(res, {
+    fallbackMessage: '邀请信息加载失败，请稍后再试',
+    unauthorizedMessage: '登录状态已失效，请重新登录',
+  })
 }
 
 export async function trackReferral(inviteCode) {
@@ -20,5 +24,8 @@ export async function trackReferral(inviteCode) {
     },
     body: JSON.stringify({ invite_code: inviteCode })
   })
-  return res.json()
+  return parseApiResponse(res, {
+    fallbackMessage: '邀请码提交失败，请稍后再试',
+    unauthorizedMessage: '登录状态已失效，请重新登录',
+  })
 }

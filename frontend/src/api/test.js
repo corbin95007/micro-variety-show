@@ -1,8 +1,9 @@
 import { supabase } from '../utils/supabase'
+import { parseApiResponse } from '../utils/http'
 
 export async function getQuestions() {
   const res = await fetch('/api/test/questions')
-  return res.json()
+  return parseApiResponse(res, { fallbackMessage: '题目加载失败，请稍后再试' })
 }
 
 export async function submitTest(answers) {
@@ -15,7 +16,10 @@ export async function submitTest(answers) {
     },
     body: JSON.stringify({ answers })
   })
-  return res.json()
+  return parseApiResponse(res, {
+    fallbackMessage: '提交失败',
+    unauthorizedMessage: '登录状态已失效，请重新登录',
+  })
 }
 
 export async function getResult(id) {
@@ -25,7 +29,11 @@ export async function getResult(id) {
       'Authorization': `Bearer ${session?.access_token}`
     }
   })
-  return res.json()
+  return parseApiResponse(res, {
+    fallbackMessage: '结果加载失败，请稍后再试',
+    unauthorizedMessage: '登录状态已失效，请重新登录',
+    notFoundMessage: '未找到这份测试结果',
+  })
 }
 
 export async function getResults() {
@@ -35,5 +43,8 @@ export async function getResults() {
       'Authorization': `Bearer ${session?.access_token}`
     }
   })
-  return res.json()
+  return parseApiResponse(res, {
+    fallbackMessage: '测试结果列表加载失败，请稍后再试',
+    unauthorizedMessage: '登录状态已失效，请重新登录',
+  })
 }

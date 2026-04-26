@@ -1,4 +1,5 @@
 import { supabase } from '../utils/supabase'
+import { parseApiResponse } from '../utils/http'
 
 export async function checkUnlock(resultId) {
   const { data: { session } } = await supabase.auth.getSession()
@@ -10,5 +11,8 @@ export async function checkUnlock(resultId) {
     },
     body: JSON.stringify({ result_id: resultId })
   })
-  return res.json()
+  return parseApiResponse(res, {
+    fallbackMessage: '解锁状态获取失败',
+    unauthorizedMessage: '登录状态已失效，请重新登录',
+  })
 }
