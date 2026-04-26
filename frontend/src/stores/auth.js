@@ -36,6 +36,13 @@ export const useAuthStore = defineStore('auth', () => {
       options: { data: { nickname } }
     })
     if (error) throw error
+    // 注册成功后设置用户并等待profile创建
+    if (data.session) {
+      user.value = data.session.user
+      // 等待触发器创建profile（短暂延迟确保数据库触发器完成）
+      await new Promise(resolve => setTimeout(resolve, 500))
+      await fetchProfile()
+    }
     return data
   }
 
@@ -44,12 +51,38 @@ export const useAuthStore = defineStore('auth', () => {
       email, password
     })
     if (error) throw error
+    if (data.session) {
+      user.value = data.session.user
+      await fetchProfile()
+    }
     return data
   }
 
   async function logout() {
     await supabase.auth.signOut()
+    user.value = null
+    profile.value = null
   }
 
-  return { user, profile, loading, init, register, login, logout, fetchProfile }
+  async function updateNickname(nickname) {
+    if (!user.value) throw new Error('未登录')
+    const { error } = await supabase
+      .from('profiles')
+      .update({ nickname })
+      .eq('id', user.value.id)
+    if (error) throw error
+    // 同时更新 auth metadata
+    await supabase.auth.updateUser({ data: { nickname } })
+    await fetchProfile()
+  }
+
+  async function updatePassword(newPassword) {
+    if (!user.value) throw new Error('未登录')
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword
+    })
+    if (error) throw error
+  }
+
+  return { user, profile, loading, init, register, login, logout, fetchProfile, updateNickname, updatePassword }
 })

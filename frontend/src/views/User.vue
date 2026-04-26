@@ -41,6 +41,26 @@
       </section>
 
       <section class="card-section">
+        <div class="section-label">账户设置</div>
+        <div class="info-card">
+          <button class="setting-btn" @click="showNicknameDialog = true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span>修改昵称</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:auto"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          <button class="setting-btn" @click="showPasswordDialog = true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            <span>修改密码</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:auto"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="card-section">
         <div class="section-label">{{ U.paymentSectionTitle }}</div>
         <div class="info-card">
           <div class="payment-row">
@@ -56,6 +76,30 @@
 
       <button class="logout-btn" @click="handleLogout">{{ U.logoutBtn }}</button>
     </div>
+
+    <!-- 修改昵称弹窗 -->
+    <van-dialog
+      v-model:show="showNicknameDialog"
+      title="修改昵称"
+      show-cancel-button
+      :before-close="handleNicknameDialogClose"
+    >
+      <div style="padding: 20px;">
+        <input v-model="newNickname" class="dialog-input" type="text" placeholder="输入新昵称" />
+      </div>
+    </van-dialog>
+
+    <!-- 修改密码弹窗 -->
+    <van-dialog
+      v-model:show="showPasswordDialog"
+      title="修改密码"
+      show-cancel-button
+      :before-close="handlePasswordDialogClose"
+    >
+      <div style="padding: 20px;">
+        <input v-model="newPassword" class="dialog-input" type="password" placeholder="输入新密码（至少6位）" />
+      </div>
+    </van-dialog>
   </div>
 </template>
 
@@ -71,13 +115,56 @@ const router = useRouter()
 const auth = useAuthStore()
 const referralInfo = ref({ invite_code: '', referral_count: 0, target: 3 })
 
+// 修改昵称相关
+const showNicknameDialog = ref(false)
+const newNickname = ref('')
+
+// 修改密码相关
+const showPasswordDialog = ref(false)
+const newPassword = ref('')
+
 onMounted(async () => {
   const token = (await supabase.auth.getSession()).data.session?.access_token
   const resp = await fetch('/api/referral/info', {
     headers: { 'Authorization': `Bearer ${token}` },
   })
   if (resp.ok) referralInfo.value = await resp.json()
+  // 初始化昵称输入框
+  newNickname.value = auth.profile?.nickname || ''
 })
+
+async function handleNicknameDialogClose(action) {
+  if (action !== 'confirm') return true  // 取消直接关闭
+  if (!newNickname.value.trim()) {
+    showToast({ message: '昵称不能为空', position: 'bottom' })
+    return false  // 阻止关闭
+  }
+  try {
+    await auth.updateNickname(newNickname.value.trim())
+    showToast({ message: '昵称修改成功', position: 'bottom' })
+    return true  // 成功后关闭
+  } catch (e) {
+    showToast({ message: e.message || '修改失败', position: 'bottom' })
+    return false  // 失败不关闭
+  }
+}
+
+async function handlePasswordDialogClose(action) {
+  if (action !== 'confirm') return true
+  if (!newPassword.value || newPassword.value.length < 6) {
+    showToast({ message: '密码至少需要6位', position: 'bottom' })
+    return false
+  }
+  try {
+    await auth.updatePassword(newPassword.value)
+    newPassword.value = ''
+    showToast({ message: '密码修改成功', position: 'bottom' })
+    return true
+  } catch (e) {
+    showToast({ message: e.message || '修改失败', position: 'bottom' })
+    return false
+  }
+}
 
 async function copyLink() {
   const url = `${window.location.origin}/login?invite=${referralInfo.value.invite_code}`
@@ -310,4 +397,39 @@ async function handleLogout() {
 }
 
 .logout-btn:active { color: var(--color-accent); border-color: var(--color-accent); }
+
+.setting-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-divider);
+  color: var(--color-ink);
+  font-size: 14px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.setting-btn:last-child { border-bottom: none; }
+.setting-btn:active { color: var(--color-primary); }
+
+.dialog-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  background: var(--color-bg);
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.dialog-input:focus { border-color: var(--color-primary); }
+.dialog-input::placeholder { color: var(--color-ink-muted); }
 </style>

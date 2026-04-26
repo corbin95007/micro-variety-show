@@ -19,8 +19,13 @@ import { useAuthStore } from '../stores/auth'
 
 router.beforeEach((to) => {
   const auth = useAuthStore()
+  // 未登录用户访问需要认证的页面 → 跳转登录
   if (to.meta.auth && !auth.user) {
     return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  // 已登录用户访问登录页 → 跳转主页
+  if (to.path === '/login' && auth.user) {
+    return { path: '/' }
   }
 })
 
