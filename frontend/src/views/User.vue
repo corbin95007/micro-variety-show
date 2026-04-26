@@ -3,19 +3,30 @@
     <header class="user-header">
       <div class="user-header-bg"></div>
       <div class="user-header-content">
-        <button class="back-btn" @click="$router.back()">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
-        <div class="user-avatar">
-          {{ (auth.profile?.nickname || '?')[0] }}
+        <div class="header-top">
+          <button class="back-btn" @click="$router.back()">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <button v-if="auth.user" class="settings-entry" @click="router.push('/user/settings')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.54V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.54 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.54-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.54-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.54V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.54 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.64.24 1.06.86 1.06 1.54V11a2 2 0 1 1 0 4h-.09c-.68 0-1.3.42-1.54 1Z"/>
+            </svg>
+          </button>
         </div>
-        <h2 class="user-nickname">{{ auth.profile?.nickname || '未设置昵称' }}</h2>
-        <p class="user-email">{{ auth.user?.email }}</p>
+        <div class="user-avatar" :class="{ empty: !avatarUrl }">
+          <img v-if="avatarUrl" :src="avatarUrl" alt="用户头像" class="avatar-image" />
+          <svg v-else class="avatar-placeholder" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M20 21a8 8 0 0 0-16 0"/>
+            <circle cx="12" cy="8" r="4"/>
+          </svg>
+        </div>
+        <h2 class="user-nickname">{{ auth.user ? auth.profile?.nickname || '未设置昵称' : '访客模式' }}</h2>
+        <p class="user-email">{{ auth.user?.email || '登录后可查看邀请记录和账户设置' }}</p>
       </div>
     </header>
 
     <div class="user-body">
-      <section class="card-section">
+      <section v-if="auth.user" class="card-section">
         <div class="section-label">{{ U.referralSectionTitle }}</div>
         <div class="info-card">
           <div class="info-row">
@@ -40,27 +51,15 @@
         </div>
       </section>
 
-      <section class="card-section">
-        <div class="section-label">账户设置</div>
-        <div class="info-card">
-          <button class="setting-btn" @click="showNicknameDialog = true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-            </svg>
-            <span>修改昵称</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:auto"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
-          <button class="setting-btn" @click="showPasswordDialog = true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-            <span>修改密码</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:auto"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
+      <section v-else class="card-section">
+        <div class="info-card guest-card">
+          <div class="guest-title">当前未登录</div>
+          <p class="guest-desc">登录后可修改昵称、头像和密码，也能复制你的专属邀请链接。</p>
+          <button class="guest-login-btn" @click="goLogin">去登录</button>
         </div>
       </section>
 
-      <section class="card-section">
+      <section v-if="auth.user" class="card-section">
         <div class="section-label">{{ U.paymentSectionTitle }}</div>
         <div class="info-card">
           <div class="payment-row">
@@ -74,37 +73,13 @@
         </div>
       </section>
 
-      <button class="logout-btn" @click="handleLogout">{{ U.logoutBtn }}</button>
+      <button v-if="auth.user" class="logout-btn" @click="handleLogout">{{ U.logoutBtn }}</button>
     </div>
-
-    <!-- 修改昵称弹窗 -->
-    <van-dialog
-      v-model:show="showNicknameDialog"
-      title="修改昵称"
-      show-cancel-button
-      :before-close="handleNicknameDialogClose"
-    >
-      <div style="padding: 20px;">
-        <input v-model="newNickname" class="dialog-input" type="text" placeholder="输入新昵称" />
-      </div>
-    </van-dialog>
-
-    <!-- 修改密码弹窗 -->
-    <van-dialog
-      v-model:show="showPasswordDialog"
-      title="修改密码"
-      show-cancel-button
-      :before-close="handlePasswordDialogClose"
-    >
-      <div style="padding: 20px;">
-        <input v-model="newPassword" class="dialog-input" type="password" placeholder="输入新密码（至少6位）" />
-      </div>
-    </van-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '../utils/supabase'
@@ -114,59 +89,38 @@ import { USER as U, TOAST } from '../constants'
 const router = useRouter()
 const auth = useAuthStore()
 const referralInfo = ref({ invite_code: '', referral_count: 0, target: 3 })
+const avatarUrl = computed(() => auth.profile?.avatar_url || '')
 
-// 修改昵称相关
-const showNicknameDialog = ref(false)
-const newNickname = ref('')
+watch(
+  () => auth.user?.id,
+  async (userId) => {
+    if (!userId) {
+      referralInfo.value = { invite_code: '', referral_count: 0, target: 3 }
+      return
+    }
 
-// 修改密码相关
-const showPasswordDialog = ref(false)
-const newPassword = ref('')
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token
+      const resp = await fetch('/api/referral/info', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
 
-onMounted(async () => {
-  const token = (await supabase.auth.getSession()).data.session?.access_token
-  const resp = await fetch('/api/referral/info', {
-    headers: { 'Authorization': `Bearer ${token}` },
-  })
-  if (resp.ok) referralInfo.value = await resp.json()
-  // 初始化昵称输入框
-  newNickname.value = auth.profile?.nickname || ''
-})
-
-async function handleNicknameDialogClose(action) {
-  if (action !== 'confirm') return true  // 取消直接关闭
-  if (!newNickname.value.trim()) {
-    showToast({ message: '昵称不能为空', position: 'bottom' })
-    return false  // 阻止关闭
-  }
-  try {
-    await auth.updateNickname(newNickname.value.trim())
-    showToast({ message: '昵称修改成功', position: 'bottom' })
-    return true  // 成功后关闭
-  } catch (e) {
-    showToast({ message: e.message || '修改失败', position: 'bottom' })
-    return false  // 失败不关闭
-  }
-}
-
-async function handlePasswordDialogClose(action) {
-  if (action !== 'confirm') return true
-  if (!newPassword.value || newPassword.value.length < 6) {
-    showToast({ message: '密码至少需要6位', position: 'bottom' })
-    return false
-  }
-  try {
-    await auth.updatePassword(newPassword.value)
-    newPassword.value = ''
-    showToast({ message: '密码修改成功', position: 'bottom' })
-    return true
-  } catch (e) {
-    showToast({ message: e.message || '修改失败', position: 'bottom' })
-    return false
-  }
-}
+      if (resp.ok) {
+        referralInfo.value = await resp.json()
+      }
+    } catch {
+      referralInfo.value = { invite_code: '', referral_count: 0, target: 3 }
+    }
+  },
+  { immediate: true }
+)
 
 async function copyLink() {
+  if (!auth.user) {
+    showToast({ message: TOAST.notLoggedIn, position: 'bottom' })
+    return
+  }
+
   const url = `${window.location.origin}/login?invite=${referralInfo.value.invite_code}`
   try {
     await navigator.clipboard.writeText(url)
@@ -178,6 +132,10 @@ async function copyLink() {
 
 function handlePayment() {
   showToast({ message: TOAST.paymentComingSoon, position: 'bottom' })
+}
+
+function goLogin() {
+  router.push({ path: '/login', query: { redirect: '/user' } })
 }
 
 async function handleLogout() {
@@ -207,27 +165,57 @@ async function handleLogout() {
   padding: 16px 20px 32px;
 }
 
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
 .back-btn {
   background: none;
   border: none;
   cursor: pointer;
   padding: 4px;
-  margin-bottom: 20px;
+}
+
+.settings-entry {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 .user-avatar {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--color-accent);
-  color: #fff;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+}
+
+.user-avatar.empty {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-placeholder {
+  flex-shrink: 0;
 }
 
 .user-nickname {
@@ -398,38 +386,34 @@ async function handleLogout() {
 
 .logout-btn:active { color: var(--color-accent); border-color: var(--color-accent); }
 
-.setting-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 0;
-  background: none;
-  border: none;
-  border-bottom: 1px solid var(--color-divider);
+.guest-card {
+  text-align: center;
+}
+
+.guest-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
   color: var(--color-ink);
+}
+
+.guest-desc {
+  margin-top: 10px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--color-ink-light);
+}
+
+.guest-login-btn {
+  margin-top: 20px;
+  padding: 12px 28px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: #fff;
   font-size: 14px;
+  font-weight: 600;
   font-family: var(--font-body);
   cursor: pointer;
-  transition: color 0.15s ease;
 }
-
-.setting-btn:last-child { border-bottom: none; }
-.setting-btn:active { color: var(--color-primary); }
-
-.dialog-input {
-  width: 100%;
-  padding: 12px 14px;
-  border: 1.5px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: 15px;
-  font-family: var(--font-body);
-  color: var(--color-ink);
-  background: var(--color-bg);
-  outline: none;
-  transition: border-color 0.2s ease;
-}
-
-.dialog-input:focus { border-color: var(--color-primary); }
-.dialog-input::placeholder { color: var(--color-ink-muted); }
 </style>

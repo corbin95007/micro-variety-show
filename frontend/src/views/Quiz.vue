@@ -8,11 +8,24 @@
       <div class="progress-info">{{ answeredCount }}/{{ testStore.questions.length }}</div>
     </header>
 
-    <div class="progress-track">
+    <div v-if="auth.user" class="progress-track">
       <div class="progress-fill" :style="{ width: progress + '%' }"></div>
     </div>
 
-    <div class="question-list">
+    <div v-if="!auth.user" class="guest-state">
+      <div class="guest-card">
+        <div class="guest-icon">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-muted)" stroke-width="1.2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+          </svg>
+        </div>
+        <h2 class="guest-title">登录后开始测试</h2>
+        <p class="guest-desc">为了保存答案和生成你的测试结果，这一页改为手动登录进入，不再自动弹出登录页。</p>
+        <button class="guest-login-btn" @click="goLogin">去登录</button>
+      </div>
+    </div>
+
+    <div v-else class="question-list">
       <div
         v-for="(q, idx) in testStore.questions"
         :key="q.id"
@@ -41,7 +54,7 @@
       </div>
     </div>
 
-    <div class="submit-section">
+    <div v-if="auth.user" class="submit-section">
       <button
         class="submit-btn"
         :class="{ 'is-ready': allAnswered }"
@@ -59,11 +72,16 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { showToast } from 'vant'
+import { useAuthStore } from '../stores/auth'
 import { useTestStore } from '../stores/test'
 import { supabase } from '../utils/supabase'
 import UnlockDialog from '../components/UnlockDialog.vue'
 import { QUIZ as QUIZ_TEXT } from '../constants'
 
+const router = useRouter()
+const auth = useAuthStore()
 const testStore = useTestStore()
 const submitting = ref(false)
 const showDialog = ref(false)
@@ -85,9 +103,14 @@ const progress = computed(() =>
 )
 
 onMounted(() => {
+  if (!auth.user) return
   testStore.reset()
   testStore.fetchQuestions()
 })
+
+function goLogin() {
+  router.push({ path: '/login', query: { redirect: '/test/quiz' } })
+}
 
 async function handleSubmit() {
   submitting.value = true
@@ -98,6 +121,10 @@ async function handleSubmit() {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ answers: testStore.answers }),
     })
+    if (!resp.ok) {
+      const error = await resp.json().catch(() => ({}))
+      throw new Error(error.error || '提交失败')
+    }
     const result = await resp.json()
     resultId.value = result.id
 
@@ -106,9 +133,15 @@ async function handleSubmit() {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ result_id: result.id }),
     })
+    if (!unlockResp.ok) {
+      const error = await unlockResp.json().catch(() => ({}))
+      throw new Error(error.error || '解锁状态获取失败')
+    }
     const unlockData = await unlockResp.json()
     unlocked.value = unlockData.unlocked
     showDialog.value = true
+  } catch (error) {
+    showToast({ message: error.message || '提交失败', position: 'bottom' })
   } finally {
     submitting.value = false
   }
@@ -156,6 +189,47 @@ async function handleSubmit() {
   height: 100%;
   background: var(--color-accent);
   transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.guest-state {
+  padding: 56px 20px 0;
+}
+
+.guest-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 32px 24px;
+  text-align: center;
+}
+
+.guest-icon { margin-bottom: 16px; }
+
+.guest-title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.guest-desc {
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--color-ink-light);
+}
+
+.guest-login-btn {
+  margin-top: 20px;
+  padding: 12px 28px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
 }
 
 .question-list { padding: 16px 20px; }

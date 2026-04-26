@@ -11,6 +11,28 @@
       <div class="loading-pulse"></div>
     </div>
 
+    <div v-else-if="!auth.user" class="locked-state">
+      <div class="lock-icon-wrap">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-muted)" stroke-width="1.2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+        </svg>
+      </div>
+      <h2 class="locked-title">请先登录</h2>
+      <p class="locked-desc">登录后才能查看这份测试结果。</p>
+      <button class="unlock-btn" @click="goLogin">去登录</button>
+    </div>
+
+    <div v-else-if="errorMessage" class="locked-state">
+      <div class="lock-icon-wrap">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-muted)" stroke-width="1.2">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="0.6" fill="currentColor"/>
+        </svg>
+      </div>
+      <h2 class="locked-title">结果暂时不可用</h2>
+      <p class="locked-desc">{{ errorMessage }}</p>
+      <button class="unlock-btn" @click="$router.push('/test/results')">返回列表</button>
+    </div>
+
     <template v-else-if="result">
       <template v-if="result.is_unlocked">
         <section class="spectrum-section">
@@ -59,21 +81,41 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 import { supabase } from '../utils/supabase'
 import SpectrumBar from '../components/SpectrumBar.vue'
 import { RESULT as R } from '../constants'
 
 const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
 const result = ref(null)
 const loading = ref(true)
+const errorMessage = ref('')
+
+function goLogin() {
+  router.push({ path: '/login', query: { redirect: route.fullPath } })
+}
 
 onMounted(async () => {
+  if (!auth.user) {
+    loading.value = false
+    return
+  }
+
   const token = (await supabase.auth.getSession()).data.session?.access_token
   const resp = await fetch(`/api/test/result/${route.params.id}`, {
     headers: { 'Authorization': `Bearer ${token}` },
   })
-  result.value = await resp.json()
+
+  if (resp.ok) {
+    result.value = await resp.json()
+  } else {
+    const error = await resp.json().catch(() => ({}))
+    errorMessage.value = error.error || '结果加载失败，请稍后再试'
+  }
+
   loading.value = false
 })
 </script>

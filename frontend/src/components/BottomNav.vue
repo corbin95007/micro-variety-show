@@ -20,25 +20,14 @@
 
 <script setup>
 import { useAuthStore } from '../stores/auth'
-import { useRouter } from 'vue-router'
-import { showToast, showDialog } from 'vant'
+import { showToast } from 'vant'
 import { NAV as NAV_TEXT, TOAST } from '../constants'
 
 const auth = useAuthStore()
-const router = useRouter()
 
 async function handleShare() {
   if (!auth.user) {
-    try {
-      await showDialog({
-        title: TOAST.pleaseLogin,
-        message: TOAST.notLoggedIn,
-        confirmButtonText: '去登录',
-        cancelButtonText: '取消',
-        confirmButtonColor: 'var(--color-primary)',
-      })
-      router.push('/login')
-    } catch {}
+    showToast({ message: TOAST.notLoggedIn, position: 'bottom' })
     return
   }
   const code = auth.profile?.invite_code || ''

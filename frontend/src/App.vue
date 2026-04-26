@@ -18,7 +18,6 @@ import { useAuthStore } from './stores/auth'
 import BottomNav from './components/BottomNav.vue'
 
 const auth = useAuthStore()
-auth.init()
 </script>
 
 <style>

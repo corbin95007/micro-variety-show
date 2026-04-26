@@ -11,6 +11,14 @@
       <div class="loading-pulse"></div>
     </div>
 
+    <div v-else-if="!auth.user" class="empty-state">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-muted)" stroke-width="1.2">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+      </svg>
+      <p>登录后查看你的测试记录</p>
+      <button class="go-test-btn" @click="goLogin">去登录</button>
+    </div>
+
     <div v-else-if="!results.length" class="empty-state">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-muted)" stroke-width="1.2">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
@@ -45,9 +53,13 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 import { supabase } from '../utils/supabase'
 import { RESULT_LIST as RL } from '../constants'
 
+const router = useRouter()
+const auth = useAuthStore()
 const results = ref([])
 const loading = ref(true)
 
@@ -57,12 +69,28 @@ function formatDate(iso) {
   })
 }
 
+function goLogin() {
+  router.push({ path: '/login', query: { redirect: '/test/results' } })
+}
+
 onMounted(async () => {
+  if (!auth.user) {
+    loading.value = false
+    return
+  }
+
   const token = (await supabase.auth.getSession()).data.session?.access_token
   const resp = await fetch('/api/test/results', {
     headers: { 'Authorization': `Bearer ${token}` },
   })
-  results.value = await resp.json()
+
+  if (resp.ok) {
+    const data = await resp.json()
+    results.value = Array.isArray(data) ? data : []
+  } else {
+    results.value = []
+  }
+
   loading.value = false
 })
 </script>

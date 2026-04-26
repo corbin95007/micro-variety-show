@@ -53,19 +53,11 @@
 
 <script setup>
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
-import { showToast } from 'vant'
-import { TEST_HUB as T, TOAST } from '../constants'
+import { TEST_HUB as T } from '../constants'
 
 const router = useRouter()
-const auth = useAuthStore()
 
 function goQuiz() {
-  if (!auth.user) {
-    showToast({ message: TOAST.pleaseLogin, position: 'bottom' })
-    router.push({ path: '/login', query: { redirect: '/test/quiz' } })
-    return
-  }
   router.push('/test/quiz')
 }
 </script>
