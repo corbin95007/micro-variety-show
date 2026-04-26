@@ -35,15 +35,23 @@
 
     <template v-else-if="result">
       <template v-if="result.is_unlocked">
+        <section class="hero-section">
+          <div class="hero-card">
+            <div class="hero-meta">{{ formatDate(result.created_at) }}</div>
+            <h2 class="hero-title">{{ report?.headline || '维度结果已生成' }}</h2>
+            <p class="hero-summary">{{ report?.summary || '结果已准备好，你可以从四条光谱查看自己的位置。' }}</p>
+          </div>
+        </section>
+
         <section class="spectrum-section">
           <div class="section-label">{{ R.spectrumLabel }}</div>
           <div class="spectrum-card">
             <SpectrumBar
-              v-for="dim in R.dimensions"
-              :key="dim.key"
-              :left-label="dim.left"
-              :right-label="dim.right"
-              :value="result[dim.key]"
+              v-for="item in report?.spectrum || []"
+              :key="item.key"
+              :left-label="item.leftLabel"
+              :right-label="item.rightLabel"
+              :value="item.percentage"
             />
           </div>
         </section>
@@ -57,8 +65,15 @@
 
         <section class="portrait-section">
           <div class="section-label">{{ R.portraitLabel }}</div>
-          <div class="portrait-card">
-            <p class="portrait-placeholder">{{ R.portraitPlaceholder }}</p>
+          <div class="portrait-grid">
+            <article
+              v-for="block in report?.portrait?.blocks || []"
+              :key="block.title"
+              class="portrait-card"
+            >
+              <h3 class="portrait-card-title">{{ block.title }}</h3>
+              <p class="portrait-card-text">{{ block.body }}</p>
+            </article>
           </div>
         </section>
       </template>
@@ -80,7 +95,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '../utils/supabase'
@@ -93,9 +108,20 @@ const auth = useAuthStore()
 const result = ref(null)
 const loading = ref(true)
 const errorMessage = ref('')
+const report = computed(() => result.value?.report || null)
 
 function goLogin() {
   router.push({ path: '/login', query: { redirect: route.fullPath } })
+}
+
+function formatDate(iso) {
+  return new Date(iso).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 onMounted(async () => {
@@ -175,6 +201,39 @@ onMounted(async () => {
 
 .spectrum-section { padding-top: 28px; }
 
+.hero-section {
+  padding: 28px 20px 0;
+}
+
+.hero-card {
+  background: linear-gradient(135deg, #2f1557 0%, #4d227d 100%);
+  color: #fff;
+  border-radius: var(--radius-lg);
+  padding: 24px 22px;
+  box-shadow: var(--shadow-elevated);
+}
+
+.hero-meta {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+
+.hero-title {
+  margin-top: 10px;
+  font-family: var(--font-display);
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.hero-summary {
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: rgba(255, 255, 255, 0.78);
+}
+
 .spectrum-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -205,18 +264,30 @@ onMounted(async () => {
 
 .portrait-section { padding-top: 28px; padding-bottom: 100px; }
 
+.portrait-grid {
+  display: grid;
+  gap: 12px;
+  padding: 0 20px;
+}
+
 .portrait-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 24px;
-  margin: 0 20px;
 }
 
-.portrait-placeholder {
-  color: var(--color-ink-muted);
+.portrait-card-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.portrait-card-text {
+  color: var(--color-ink-light);
   font-size: 14px;
-  text-align: center;
+  line-height: 1.8;
 }
 
 .locked-state {

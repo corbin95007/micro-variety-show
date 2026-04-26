@@ -4,6 +4,10 @@
   "scripts": {
     "dev": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
-    "test": "vitest run"
+    "test": "vitest run --pool threads",
+    "import:question-bank": "powershell -ExecutionPolicy Bypass -File scripts/import-question-bank.ps1"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.5"
   }
 }

@@ -1,12 +1,23 @@
 // 维度常量映射（中文名 -> 英文字段名）
 const DIMENSION_MAP = {
+  '女本位-男本位': 'female_male',
   '女男倾向': 'female_male',
+  '本土-国际': 'local_international',
   '本土国际': 'local_international',
+  '加速主义-改良主义': 'accel_reform',
   '激进改革': 'accel_reform',
+  '平等主义-优绩主义': 'equal_merit',
   '平等精英': 'equal_merit'
 }
 
 const DIMENSIONS = Object.values(DIMENSION_MAP)
+const DEFAULT_TAG_THRESHOLD = 3
+const TAG_THRESHOLDS = {
+  '马派女权': 4,
+  '辱男词推广大使': 2,
+  '平权主义': 4,
+  '女同女权': 4,
+}
 
 // 用户选择到系数的映射（5点量表）
 // 1=极度不赞同(-2), 2=部分不赞同(-1), 3=中立(0), 4=部分赞同(1), 5=极度赞同(2)
@@ -18,6 +29,35 @@ const CHOICE_COEFFICIENT = {
   5: 2
 }
 
+function normalizeDimension(dimension) {
+  if (!dimension) return null
+  return DIMENSION_MAP[dimension] || dimension
+}
+
+function normalizeWeight(weight) {
+  const numericWeight = Number(weight)
+  return Number.isFinite(numericWeight) ? numericWeight : 1
+}
+
+function parseTagPairs(rawTags) {
+  if (!rawTags) return []
+
+  return rawTags
+    .split(/[\r\n,，;；]+/)
+    .map(segment => segment.trim())
+    .filter(Boolean)
+    .map(segment => {
+      const match = segment.match(/^(.+?)[：:]([+-]?\d+)$/)
+      if (!match) return null
+
+      return {
+        tagName: match[1].trim(),
+        score: Number.parseInt(match[2], 10),
+      }
+    })
+    .filter(Boolean)
+}
+
 export function calculateScores(questions, answers) {
   const sums = {}
   DIMENSIONS.forEach(d => { sums[d] = 0 })
@@ -26,13 +66,13 @@ export function calculateScores(questions, answers) {
     const choice = answers[q.id]
     if (choice == null) continue
 
-    const coefficient = CHOICE_COEFFICIENT[choice] || 0
+    const coefficient = CHOICE_COEFFICIENT[Number(choice)] || 0
 
     // 处理维度1
     if (q.dimension1) {
-      const dimKey = DIMENSION_MAP[q.dimension1] || q.dimension1
+      const dimKey = normalizeDimension(q.dimension1)
       if (DIMENSIONS.includes(dimKey)) {
-        const weight = q.weight1 || 1
+        const weight = normalizeWeight(q.weight1)
         const score = weight * coefficient
         sums[dimKey] += score
       }
@@ -40,9 +80,9 @@ export function calculateScores(questions, answers) {
 
     // 处理维度2
     if (q.dimension2) {
-      const dimKey = DIMENSION_MAP[q.dimension2] || q.dimension2
+      const dimKey = normalizeDimension(q.dimension2)
       if (DIMENSIONS.includes(dimKey)) {
-        const weight = q.weight2 || 1
+        const weight = normalizeWeight(q.weight2)
         const score = weight * coefficient
         sums[dimKey] += score
       }
@@ -57,7 +97,7 @@ export function calculateScores(questions, answers) {
   return scores
 }
 
-export function assignTags(questions, answers, scores) {
+export function assignTags(questions, answers, tagThresholds = TAG_THRESHOLDS) {
   const tagScores = {}
 
   for (const q of questions) {
@@ -74,13 +114,8 @@ export function assignTags(questions, answers, scores) {
     }[choice]
 
     if (tagField && q[tagField]) {
-      // 解析标签字符串，格式如 "脱弱役:+1, 家庭主妇:+1"
-      const tagPairs = q[tagField].split(',').map(s => s.trim())
-      for (const pair of tagPairs) {
-        const match = pair.match(/^(.+?):([+-]?\d+)$/)
-        if (match) {
-          const [, tagName, scoreStr] = match
-          const score = parseInt(scoreStr)
+      for (const { tagName, score } of parseTagPairs(q[tagField])) {
+        if (Number.isFinite(score)) {
           tagScores[tagName] = (tagScores[tagName] || 0) + score
         }
       }
@@ -88,15 +123,9 @@ export function assignTags(questions, answers, scores) {
   }
 
   // 根据标签阈值筛选最终标签
-  const TAG_THRESHOLDS = {
-    '脱弱役': 4,
-    '家庭主妇': 3,
-    '自由主义': 3
-  }
-
   const tags = []
   for (const [tagName, score] of Object.entries(tagScores)) {
-    const threshold = TAG_THRESHOLDS[tagName] || 3
+    const threshold = tagThresholds[tagName] ?? DEFAULT_TAG_THRESHOLD
     if (score >= threshold) {
       tags.push(tagName)
     }
