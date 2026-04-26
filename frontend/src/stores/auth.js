@@ -1,14 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { supabase } from '../utils/supabase'
-import { AVATAR_BUCKET, getAvatarUrl } from '../utils/profile'
-
-const AVATAR_EXTENSION_MAP = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-}
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
@@ -20,37 +12,11 @@ export const useAuthStore = defineStore('auth', () => {
   function buildProfile(data = {}) {
     if (!user.value) return null
 
-    const avatarPath = data.avatar_path ?? profile.value?.avatar_path ?? ''
-
     return {
       ...data,
       id: data.id || user.value.id,
       nickname: data.nickname || profile.value?.nickname || user.value.user_metadata?.nickname || '未设置昵称',
       invite_code: data.invite_code || profile.value?.invite_code || '',
-      avatar_path: avatarPath,
-      avatar_url: getAvatarUrl(avatarPath),
-    }
-  }
-
-  function getAvatarExtension(file) {
-    const fileName = String(file?.name || '')
-    const nameMatch = fileName.match(/\.([a-zA-Z0-9]+)$/)
-    if (nameMatch) {
-      const extension = nameMatch[1].toLowerCase()
-      if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(extension)) {
-        return extension === 'jpeg' ? 'jpg' : extension
-      }
-    }
-
-    return AVATAR_EXTENSION_MAP[file?.type] || 'png'
-  }
-
-  async function removeAvatarFile(path) {
-    if (!path) return
-
-    const { error } = await supabase.storage.from(AVATAR_BUCKET).remove([path])
-    if (error) {
-      console.warn('remove avatar file failed', error)
     }
   }
 
@@ -217,78 +183,6 @@ export const useAuthStore = defineStore('auth', () => {
 
     return profile.value
   }
-
-  async function updateAvatar(file) {
-    if (!user.value) throw new Error('未登录')
-
-    const previousAvatarPath = profile.value?.avatar_path || ''
-    const extension = getAvatarExtension(file)
-    const nextAvatarPath = `${user.value.id}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`
-
-    const { error: uploadError } = await supabase.storage
-      .from(AVATAR_BUCKET)
-      .upload(nextAvatarPath, file, {
-        cacheControl: '3600',
-        contentType: file.type || undefined,
-        upsert: false,
-      })
-
-    if (uploadError) throw uploadError
-
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update({ avatar_path: nextAvatarPath })
-      .eq('id', user.value.id)
-
-    if (updateError) {
-      await removeAvatarFile(nextAvatarPath)
-      throw updateError
-    }
-
-    try {
-      await fetchProfile()
-    } catch {
-      profile.value = {
-        ...(buildProfile() || {}),
-        avatar_path: nextAvatarPath,
-        avatar_url: getAvatarUrl(nextAvatarPath),
-      }
-    }
-
-    if (previousAvatarPath && previousAvatarPath !== nextAvatarPath) {
-      await removeAvatarFile(previousAvatarPath)
-    }
-
-    return profile.value
-  }
-
-  async function clearAvatar() {
-    if (!user.value) throw new Error('未登录')
-
-    const previousAvatarPath = profile.value?.avatar_path || ''
-    if (!previousAvatarPath) return profile.value
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ avatar_path: null })
-      .eq('id', user.value.id)
-
-    if (error) throw error
-
-    try {
-      await fetchProfile()
-    } catch {
-      profile.value = {
-        ...(buildProfile() || {}),
-        avatar_path: '',
-        avatar_url: '',
-      }
-    }
-
-    await removeAvatarFile(previousAvatarPath)
-    return profile.value
-  }
-
   async function updatePassword(newPassword) {
     if (!user.value) throw new Error('未登录')
 
@@ -308,8 +202,6 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     fetchProfile,
     updateNickname,
-    updateAvatar,
-    clearAvatar,
     updatePassword,
   }
 })

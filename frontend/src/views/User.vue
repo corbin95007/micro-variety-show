@@ -13,13 +13,6 @@
             </svg>
           </button>
         </div>
-        <div class="user-avatar" :class="{ empty: !avatarUrl }">
-          <img v-if="avatarUrl" :src="avatarUrl" alt="用户头像" class="avatar-image" />
-          <svg v-else class="avatar-placeholder" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M20 21a8 8 0 0 0-16 0"/>
-            <circle cx="12" cy="8" r="4"/>
-          </svg>
-        </div>
         <h2 class="user-nickname">{{ auth.user ? auth.profile?.nickname || '未设置昵称' : '访客模式' }}</h2>
         <p class="user-email">{{ auth.user?.email || '登录后可查看邀请记录和账户设置' }}</p>
       </div>
@@ -54,7 +47,7 @@
       <section v-else class="card-section">
         <div class="info-card guest-card">
           <div class="guest-title">当前未登录</div>
-          <p class="guest-desc">登录后可修改昵称、头像和密码，也能复制你的专属邀请链接。</p>
+          <p class="guest-desc">登录后可修改昵称和密码，也能复制你的专属邀请链接。</p>
           <button class="guest-login-btn" @click="goLogin">去登录</button>
         </div>
       </section>
@@ -79,7 +72,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '../utils/supabase'
@@ -89,7 +82,6 @@ import { USER as U, TOAST } from '../constants'
 const router = useRouter()
 const auth = useAuthStore()
 const referralInfo = ref({ invite_code: '', referral_count: 0, target: 3 })
-const avatarUrl = computed(() => auth.profile?.avatar_url || '')
 
 watch(
   () => auth.user?.id,
@@ -189,33 +181,6 @@ async function handleLogout() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-}
-
-.user-avatar {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.24);
-}
-
-.user-avatar.empty {
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.avatar-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.avatar-placeholder {
-  flex-shrink: 0;
 }
 
 .user-nickname {
