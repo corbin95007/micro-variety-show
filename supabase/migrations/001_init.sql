@@ -107,23 +107,18 @@ create trigger on_auth_user_created
 
 -- ============ 8. RLS 策略 ============
 
--- profiles: 用户只能读写自己的 profile
+-- profiles: 所有人可读（邀请追踪需要通过invite_code查找任意用户），但只能更新自己
 alter table public.profiles enable row level security;
 
 drop policy if exists "profiles_select_own" on public.profiles;
-create policy "profiles_select_own" on public.profiles
-  for select using (auth.uid() = id);
+drop policy if exists "profiles_select_by_invite_code" on public.profiles;
+create policy "profiles_select_all" on public.profiles
+  for select using (true);
+-- 注意：profiles表只暴露 id/nickname/invite_code，不含敏感信息，允许公开读取
 
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles
   for update using (auth.uid() = id);
-
--- profiles: 允许通过 invite_code 查询（邀请追踪需要）
-drop policy if exists "profiles_select_by_invite_code" on public.profiles;
-create policy "profiles_select_by_invite_code" on public.profiles
-  for select using (true);
--- 注意：上面用 true 是因为 referral/track.js 需要通过 invite_code 查找任意用户
--- 但 profiles 表只暴露了 id 和 invite_code，不含敏感信息
 
 -- tests: 所有人可读（题库是公开的）
 alter table public.tests enable row level security;
