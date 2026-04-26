@@ -1,8 +1,32 @@
 import { supabase } from './supabase.js'
 
 const MANUAL_ACCESS_TABLE = 'user_report_access'
-const TABLE_MISSING_ERROR_CODE = '42P01'
 const MANUAL_UNLOCK_METHOD = 'manual'
+const MANUAL_ACCESS_FALLBACK_CODES = new Set(['42P01', 'PGRST205'])
+
+function isIgnorableManualAccessError(error) {
+  if (!error) return false
+  if (MANUAL_ACCESS_FALLBACK_CODES.has(error.code)) return true
+
+  const errorText = [
+    error.message,
+    error.details,
+    error.hint,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+
+  return (
+    errorText.includes(MANUAL_ACCESS_TABLE) &&
+    (
+      errorText.includes('could not find') ||
+      errorText.includes('schema cache') ||
+      errorText.includes('does not exist') ||
+      errorText.includes('relation')
+    )
+  )
+}
 
 export async function getUnlockDecision(userId) {
   if (process.env.EPISODE_ONE_AIRED === 'true') {
@@ -32,7 +56,7 @@ export async function getUnlockDecision(userId) {
       .maybeSingle(),
   ])
 
-  if (manualAccessResponse.error && manualAccessResponse.error.code !== TABLE_MISSING_ERROR_CODE) {
+  if (manualAccessResponse.error && !isIgnorableManualAccessError(manualAccessResponse.error)) {
     throw manualAccessResponse.error
   }
 
