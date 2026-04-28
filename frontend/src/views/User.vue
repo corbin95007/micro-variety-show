@@ -39,7 +39,7 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
             </svg>
-            复制邀请链接
+            {{ U.copyLinkBtn }}
           </button>
         </div>
       </section>
@@ -62,7 +62,22 @@
             </div>
             <span class="payment-price">{{ U.paymentPrice }}</span>
           </div>
-          <button type="button" class="payment-btn" @click="handlePayment">{{ U.paymentBtn }}</button>
+          <button
+            type="button"
+            class="payment-btn"
+            :disabled="paymentButtonDisabled"
+            @click="handlePayment"
+          >
+            {{ paymentButtonText }}
+          </button>
+          <div
+            v-if="paymentNotice.visible"
+            class="payment-notice"
+            :class="`payment-notice--${paymentNotice.tone}`"
+          >
+            <div class="payment-notice-title">{{ paymentNotice.title }}</div>
+            <div class="payment-notice-desc">{{ paymentNotice.desc }}</div>
+          </div>
         </div>
       </section>
 
@@ -72,42 +87,214 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
-import { supabase } from '../utils/supabase'
-import { parseApiResponse } from '../utils/http'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
+import { getPaymentStatus, createPayment, getLatestPaymentStatus } from '../api/payment'
+import { getReferralInfo } from '../api/referral'
+import { useAuthStore } from '../stores/auth'
+import { formatRequestError } from '../utils/http'
 import { USER as U, TOAST } from '../constants'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const referralInfo = ref({ invite_code: '', referral_count: 0, target: 3 })
+const isCreatingPayment = ref(false)
+const isPollingPayment = ref(false)
+const hasSuccessfulPayment = ref(false)
+const paymentNotice = ref({
+  visible: false,
+  tone: 'pending',
+  title: '',
+  desc: '',
+})
+let activePaymentId = ''
+let paymentPollToken = 0
 
 watch(
   () => auth.user?.id,
   async (userId) => {
     if (!userId) {
       referralInfo.value = { invite_code: '', referral_count: 0, target: 3 }
+      hasSuccessfulPayment.value = false
+      paymentPollToken += 1
+      activePaymentId = ''
+      clearPaymentNotice()
       return
     }
 
-    try {
-      const token = (await supabase.auth.getSession()).data.session?.access_token
-      const resp = await fetch('/api/referral/info', {
-        headers: { 'Authorization': `Bearer ${token}` },
-      })
-
-      referralInfo.value = await parseApiResponse(resp, {
-        fallbackMessage: '邀请信息加载失败，请稍后再试',
-        unauthorizedMessage: '登录状态已失效，请重新登录',
-      })
-    } catch {
-      referralInfo.value = { invite_code: '', referral_count: 0, target: 3 }
-    }
+    await Promise.all([
+      loadReferralInfo(),
+      loadLatestPaymentState(),
+    ])
   },
   { immediate: true }
 )
+
+watch(
+  [
+    () => auth.user?.id,
+    () => auth.loading,
+    () => route.query.payment_id,
+  ],
+  async ([userId, loading, paymentId]) => {
+    const normalizedPaymentId = Array.isArray(paymentId) ? paymentId[0] : paymentId
+
+    if (loading || !userId || !normalizedPaymentId) return
+    await pollPaymentResult(normalizedPaymentId)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  paymentPollToken += 1
+})
+
+const paymentButtonDisabled = computed(() => (
+  hasSuccessfulPayment.value ||
+  isCreatingPayment.value ||
+  isPollingPayment.value
+))
+
+const paymentButtonText = computed(() => {
+  if (hasSuccessfulPayment.value) return '已完成购买'
+  if (isPollingPayment.value) return '支付确认中...'
+  if (isCreatingPayment.value) return '跳转支付宝中...'
+  return U.paymentBtn
+})
+
+async function loadReferralInfo() {
+  try {
+    referralInfo.value = await getReferralInfo()
+  } catch {
+    referralInfo.value = { invite_code: '', referral_count: 0, target: 3 }
+  }
+}
+
+async function loadLatestPaymentState() {
+  try {
+    const payload = await getLatestPaymentStatus()
+    const latestPayment = payload.payment
+
+    hasSuccessfulPayment.value = latestPayment?.status === 'success'
+
+    if (hasSuccessfulPayment.value && !route.query.payment_id) {
+      setPaymentNotice(
+        'success',
+        '购买已完成',
+        '支付成功后，历史结果和后续新结果都会自动解锁。'
+      )
+    } else if (!hasSuccessfulPayment.value && paymentNotice.value.tone === 'success' && !route.query.payment_id) {
+      clearPaymentNotice()
+    }
+  } catch {
+    hasSuccessfulPayment.value = false
+  }
+}
+
+function setPaymentNotice(tone, title, desc) {
+  paymentNotice.value = {
+    visible: true,
+    tone,
+    title,
+    desc,
+  }
+}
+
+function clearPaymentNotice() {
+  paymentNotice.value = {
+    visible: false,
+    tone: 'pending',
+    title: '',
+    desc: '',
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function clearPaymentReturnQuery() {
+  const nextQuery = { ...route.query }
+  delete nextQuery.payment_id
+  delete nextQuery.provider
+
+  await router.replace({
+    path: route.path,
+    query: nextQuery,
+  })
+}
+
+async function pollPaymentResult(paymentId) {
+  const normalizedPaymentId = String(paymentId)
+  if (!normalizedPaymentId || activePaymentId === normalizedPaymentId) return
+
+  activePaymentId = normalizedPaymentId
+  const currentPollToken = ++paymentPollToken
+  isPollingPayment.value = true
+
+  setPaymentNotice(
+    'pending',
+    '支付结果确认中',
+    '已从支付宝跳回，正在等待支付宝异步回调确认，请稍候。'
+  )
+
+  try {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const payload = await getPaymentStatus(normalizedPaymentId)
+
+      if (currentPollToken !== paymentPollToken) return
+
+      const currentStatus = payload.payment?.status
+      if (currentStatus === 'success') {
+        hasSuccessfulPayment.value = true
+        setPaymentNotice(
+          'success',
+          '购买已完成',
+          '支付成功，历史结果和后续新结果都会自动解锁。'
+        )
+        showToast({ message: '支付成功，结果已解锁', position: 'bottom' })
+        await clearPaymentReturnQuery()
+        await loadLatestPaymentState()
+        return
+      }
+
+      if (currentStatus === 'failed' || currentStatus === 'refunded') {
+        setPaymentNotice(
+          'failed',
+          '支付未完成',
+          '支付单已关闭或支付失败，你可以重新发起购买。'
+        )
+        await clearPaymentReturnQuery()
+        return
+      }
+
+      if (attempt < 7) {
+        await wait(2000)
+      }
+    }
+
+    if (currentPollToken !== paymentPollToken) return
+
+    setPaymentNotice(
+      'pending',
+      '支付结果仍在确认',
+      '如果你已经完成付款，请等待几秒后重新进入本页查看。'
+    )
+    await clearPaymentReturnQuery()
+  } catch (error) {
+    const message = formatRequestError(error, '支付状态获取失败，请稍后再试')
+    setPaymentNotice('failed', '支付状态获取失败', message)
+    showToast({ message, position: 'bottom' })
+    await clearPaymentReturnQuery()
+  } finally {
+    if (currentPollToken === paymentPollToken) {
+      isPollingPayment.value = false
+      activePaymentId = ''
+    }
+  }
+}
 
 async function copyLink() {
   if (!auth.user) {
@@ -124,8 +311,48 @@ async function copyLink() {
   }
 }
 
-function handlePayment() {
-  showToast({ message: TOAST.paymentComingSoon, position: 'bottom' })
+function submitPaymentForm(paymentAction) {
+  if (!paymentAction?.action || !paymentAction?.fields) {
+    throw new Error('支付跳转参数缺失')
+  }
+
+  const form = document.createElement('form')
+  form.method = paymentAction.method || 'POST'
+  form.action = paymentAction.action
+  form.style.display = 'none'
+
+  Object.entries(paymentAction.fields).forEach(([key, value]) => {
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = key
+    input.value = value == null ? '' : String(value)
+    form.appendChild(input)
+  })
+
+  document.body.appendChild(form)
+  form.submit()
+}
+
+async function handlePayment() {
+  if (!auth.user) {
+    showToast({ message: TOAST.notLoggedIn, position: 'bottom' })
+    return
+  }
+
+  if (paymentButtonDisabled.value) return
+
+  isCreatingPayment.value = true
+
+  try {
+    const payload = await createPayment('alipay')
+    submitPaymentForm(payload.payment_action)
+  } catch (error) {
+    const message = formatRequestError(error, '创建支付单失败，请稍后再试')
+    setPaymentNotice('failed', '无法发起支付', message)
+    showToast({ message, position: 'bottom' })
+  } finally {
+    isCreatingPayment.value = false
+  }
 }
 
 function goLogin() {
@@ -335,7 +562,47 @@ async function handleLogout() {
   transition: transform 0.15s ease;
 }
 
+.payment-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .payment-btn:active { transform: scale(0.98); }
+
+.payment-notice {
+  margin-top: 12px;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  border: 1px solid transparent;
+}
+
+.payment-notice--pending {
+  background: rgba(201, 140, 32, 0.08);
+  border-color: rgba(201, 140, 32, 0.22);
+}
+
+.payment-notice--success {
+  background: rgba(44, 124, 92, 0.08);
+  border-color: rgba(44, 124, 92, 0.22);
+}
+
+.payment-notice--failed {
+  background: rgba(176, 74, 74, 0.08);
+  border-color: rgba(176, 74, 74, 0.22);
+}
+
+.payment-notice-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.payment-notice-desc {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-ink-light);
+}
 
 .logout-btn {
   width: 100%;
