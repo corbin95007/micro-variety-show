@@ -305,6 +305,67 @@ export function verifyAlipaySignature(params, publicKey) {
   return verifier.verify(publicKey, sign, 'base64')
 }
 
+export function extractAlipayResponseContent(rawText, responseNodeName) {
+  const source = String(rawText || '')
+  const nodeMarker = `"${responseNodeName}"`
+  const nodeIndex = source.indexOf(nodeMarker)
+
+  if (nodeIndex === -1) {
+    throw new Error(`支付宝响应缺少 ${responseNodeName}`)
+  }
+
+  const objectStart = source.indexOf('{', nodeIndex)
+  if (objectStart === -1) {
+    throw new Error(`支付宝响应中的 ${responseNodeName} 结构异常`)
+  }
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  for (let index = objectStart; index < source.length; index += 1) {
+    const char = source[index]
+
+    if (escaped) {
+      escaped = false
+      continue
+    }
+
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+
+    if (char === '"') {
+      inString = !inString
+      continue
+    }
+
+    if (inString) continue
+
+    if (char === '{') depth += 1
+    if (char === '}') depth -= 1
+
+    if (depth === 0) {
+      return source.slice(objectStart, index + 1)
+    }
+  }
+
+  throw new Error(`支付宝响应中的 ${responseNodeName} 未正常闭合`)
+}
+
+export function verifyAlipayResponseSignature(rawText, responseNodeName, sign, publicKey) {
+  if (!sign) {
+    throw new Error('支付宝响应缺少签名')
+  }
+
+  const responseContent = extractAlipayResponseContent(rawText, responseNodeName)
+  const verifier = createVerify('RSA-SHA256')
+  verifier.update(responseContent, 'utf8')
+  verifier.end()
+  return verifier.verify(publicKey, sign, 'base64')
+}
+
 export function buildAlipayWapPayForm({ req, paymentId, providerOrderNo, product }) {
   const alipayConfig = getAlipayConfig(req)
   const returnUrl = `${alipayConfig.siteBaseUrl}/user?payment_id=${paymentId}&provider=${PAYMENT_PROVIDER.ALIPAY}`
@@ -357,6 +418,163 @@ export function buildAlipayWapPayForm({ req, paymentId, providerOrderNo, product
       biz_content: fields.biz_content,
     },
   }
+}
+
+async function requestAlipayApi({ req, method, bizContent }) {
+  const alipayConfig = getAlipayConfig(req)
+  const params = {
+    app_id: alipayConfig.appId,
+    method,
+    format: alipayConfig.format,
+    charset: alipayConfig.charset,
+    sign_type: alipayConfig.signType,
+    timestamp: formatAlipayTimestamp(),
+    version: alipayConfig.version,
+    biz_content: JSON.stringify(bizContent),
+  }
+
+  const body = new URLSearchParams({
+    ...params,
+    sign: signAlipayParams(params, alipayConfig.privateKey),
+  })
+
+  const response = await fetch(alipayConfig.gateway, {
+    method: 'POST',
+    headers: {
+      'Content-Type': `application/x-www-form-urlencoded;charset=${alipayConfig.charset}`,
+    },
+    body,
+  })
+
+  const rawText = await response.text()
+
+  if (!response.ok) {
+    throw new Error(`支付宝网关请求失败: HTTP ${response.status}`)
+  }
+
+  let parsed
+  try {
+    parsed = JSON.parse(rawText)
+  } catch {
+    throw new Error('支付宝网关返回了非 JSON 响应')
+  }
+
+  return {
+    alipayConfig,
+    rawText,
+    parsed,
+  }
+}
+
+export async function queryAlipayTrade({ req, providerOrderNo, providerTradeNo }) {
+  if (!providerOrderNo && !providerTradeNo) {
+    throw new Error('缺少支付宝查询单号')
+  }
+
+  const responseNodeName = 'alipay_trade_query_response'
+  const { alipayConfig, rawText, parsed } = await requestAlipayApi({
+    req,
+    method: 'alipay.trade.query',
+    bizContent: {
+      ...(providerTradeNo ? { trade_no: providerTradeNo } : {}),
+      ...(providerOrderNo ? { out_trade_no: providerOrderNo } : {}),
+    },
+  })
+
+  const responsePayload = parsed?.[responseNodeName]
+  if (!responsePayload || typeof responsePayload !== 'object') {
+    throw new Error('支付宝交易查询返回结构异常')
+  }
+
+  let responseSignatureValid = false
+  try {
+    responseSignatureValid = verifyAlipayResponseSignature(
+      rawText,
+      responseNodeName,
+      parsed?.sign,
+      alipayConfig.publicKey
+    )
+  } catch {
+    responseSignatureValid = false
+  }
+
+  return {
+    payload: responsePayload,
+    raw: parsed,
+    responseSignatureValid,
+  }
+}
+
+export async function reconcilePaymentStatus({ req, payment }) {
+  if (!payment || payment.provider !== PAYMENT_PROVIDER.ALIPAY) return payment
+  if (payment.status === PAYMENT_STATUS.SUCCESS || payment.status === PAYMENT_STATUS.REFUNDED) {
+    return payment
+  }
+
+  const { payload, raw, responseSignatureValid } = await queryAlipayTrade({
+    req,
+    providerOrderNo: payment.provider_order_no,
+    providerTradeNo: payment.provider_trade_no,
+  })
+
+  if (payload.code !== '10000') {
+    if (payload.sub_code === 'ACQ.TRADE_NOT_EXIST') {
+      return payment
+    }
+
+    throw new Error(payload.sub_msg || payload.msg || '支付宝订单查询失败')
+  }
+
+  const amountFen = parseAmountToFen(payload.total_amount)
+  if (Number.isFinite(amountFen) && Number.isInteger(payment.amount) && amountFen !== payment.amount) {
+    throw new Error('支付宝订单金额与本地支付单不一致')
+  }
+
+  if (payload.out_trade_no && payload.out_trade_no !== payment.provider_order_no) {
+    throw new Error('支付宝订单号与本地支付单不一致')
+  }
+
+  const baseFields = {
+    provider_trade_no: payload.trade_no || payment.provider_trade_no,
+    buyer_id: payload.buyer_user_id || payment.buyer_id,
+    buyer_logon_id: payload.buyer_logon_id || payment.buyer_logon_id,
+    notify_payload: {
+      source: 'trade_query',
+      response_signature_valid: responseSignatureValid,
+      response: raw,
+    },
+  }
+
+  if (!responseSignatureValid) {
+    console.warn(
+      `支付宝交易查询响应验签未通过，已按订单号和金额校验结果继续补单: ${payment.provider_order_no}`
+    )
+  }
+
+  if (payload.trade_status === 'TRADE_SUCCESS' || payload.trade_status === 'TRADE_FINISHED') {
+    return transitionPaymentStatus(payment, PAYMENT_STATUS.SUCCESS, {
+      ...baseFields,
+      paid_at: payment.paid_at || parseAlipayTime(payload.send_pay_date) || new Date().toISOString(),
+      failure_reason: null,
+    })
+  }
+
+  if (payload.trade_status === 'TRADE_CLOSED' && payment.status !== PAYMENT_STATUS.SUCCESS) {
+    return transitionPaymentStatus(payment, PAYMENT_STATUS.FAILED, {
+      ...baseFields,
+      failure_reason: '支付宝交易关闭',
+    })
+  }
+
+  if (
+    baseFields.provider_trade_no !== payment.provider_trade_no ||
+    baseFields.buyer_id !== payment.buyer_id ||
+    baseFields.buyer_logon_id !== payment.buyer_logon_id
+  ) {
+    return updatePaymentRecord(payment.id, baseFields)
+  }
+
+  return payment
 }
 
 export function isPaymentsSchemaMismatch(error) {

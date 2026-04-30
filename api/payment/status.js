@@ -2,6 +2,7 @@ import {
   getPaymentRuntimeErrorMessage,
   getLatestPaymentForUser,
   getPaymentForUser,
+  reconcilePaymentStatus,
   toClientPayment,
 } from '../_lib/payment.js'
 import { getUserId } from '../_lib/supabase.js'
@@ -32,23 +33,27 @@ export default async function handler(req, res) {
       : await getLatestPaymentForUser(userId)
 
     if (!payment) {
+      const decision = latest ? await getUnlockDecision(userId) : null
+
       if (latest) {
         return res.json({
           payment: null,
-          unlocked: false,
-          unlock_method: null,
+          unlocked: Boolean(decision?.unlocked),
+          unlock_method: decision?.method ?? null,
         })
       }
 
       return res.status(404).json({ error: '支付单不存在' })
     }
 
-    const decision = payment.status === 'success'
-      ? await getUnlockDecision(userId)
-      : null
+    const refreshedPayment = payment.status === 'success'
+      ? payment
+      : await reconcilePaymentStatus({ req, payment })
+
+    const decision = await getUnlockDecision(userId)
 
     return res.json({
-      payment: toClientPayment(payment),
+      payment: toClientPayment(refreshedPayment),
       unlocked: Boolean(decision?.unlocked),
       unlock_method: decision?.method ?? null,
     })

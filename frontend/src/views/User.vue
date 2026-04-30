@@ -57,10 +57,12 @@
         <div class="info-card">
           <div class="payment-row">
             <div>
-              <div class="payment-title">{{ U.paymentTitle }}</div>
-              <div class="payment-desc">{{ U.paymentDesc }}</div>
+              <div class="payment-title">{{ paymentCardTitle }}</div>
+              <div class="payment-desc">{{ paymentCardDesc }}</div>
             </div>
-            <span class="payment-price">{{ U.paymentPrice }}</span>
+            <span class="payment-price" :class="{ 'payment-price--unlocked': hasUnlockedAccess }">
+              {{ paymentCardBadge }}
+            </span>
           </div>
           <button
             type="button"
@@ -102,7 +104,7 @@ const auth = useAuthStore()
 const referralInfo = ref({ invite_code: '', referral_count: 0, target: 3 })
 const isCreatingPayment = ref(false)
 const isPollingPayment = ref(false)
-const hasSuccessfulPayment = ref(false)
+const hasUnlockedAccess = ref(false)
 const paymentNotice = ref({
   visible: false,
   tone: 'pending',
@@ -117,7 +119,7 @@ watch(
   async (userId) => {
     if (!userId) {
       referralInfo.value = { invite_code: '', referral_count: 0, target: 3 }
-      hasSuccessfulPayment.value = false
+      hasUnlockedAccess.value = false
       paymentPollToken += 1
       activePaymentId = ''
       clearPaymentNotice()
@@ -152,17 +154,31 @@ onBeforeUnmount(() => {
 })
 
 const paymentButtonDisabled = computed(() => (
-  hasSuccessfulPayment.value ||
+  hasUnlockedAccess.value ||
   isCreatingPayment.value ||
   isPollingPayment.value
 ))
 
 const paymentButtonText = computed(() => {
-  if (hasSuccessfulPayment.value) return '已完成购买'
+  if (hasUnlockedAccess.value) return '已解锁'
   if (isPollingPayment.value) return '支付确认中...'
   if (isCreatingPayment.value) return '跳转支付宝中...'
   return U.paymentBtn
 })
+
+const paymentCardTitle = computed(() => (
+  hasUnlockedAccess.value ? '结果解锁已生效' : U.paymentTitle
+))
+
+const paymentCardDesc = computed(() => (
+  hasUnlockedAccess.value
+    ? '历史结果和后续新结果都已可直接查看。'
+    : U.paymentDesc
+))
+
+const paymentCardBadge = computed(() => (
+  hasUnlockedAccess.value ? '已生效' : U.paymentPrice
+))
 
 async function loadReferralInfo() {
   try {
@@ -177,19 +193,27 @@ async function loadLatestPaymentState() {
     const payload = await getLatestPaymentStatus()
     const latestPayment = payload.payment
 
-    hasSuccessfulPayment.value = latestPayment?.status === 'success'
+    hasUnlockedAccess.value = Boolean(payload.unlocked || latestPayment?.status === 'success')
 
-    if (hasSuccessfulPayment.value && !route.query.payment_id) {
+    if (hasUnlockedAccess.value && !route.query.payment_id) {
       setPaymentNotice(
         'success',
-        '购买已完成',
-        '支付成功后，历史结果和后续新结果都会自动解锁。'
+        payload.unlock_method === 'payment' ? '购买已完成' : '结果已解锁',
+        payload.unlock_method === 'payment'
+          ? '支付成功后，历史结果和后续新结果都会自动解锁。'
+          : '你的结果访问权限已经生效，历史结果和后续新结果都会自动解锁。'
       )
-    } else if (!hasSuccessfulPayment.value && paymentNotice.value.tone === 'success' && !route.query.payment_id) {
+    } else if (!hasUnlockedAccess.value && paymentNotice.value.tone === 'success' && !route.query.payment_id) {
       clearPaymentNotice()
     }
-  } catch {
-    hasSuccessfulPayment.value = false
+  } catch (error) {
+    hasUnlockedAccess.value = false
+
+    setPaymentNotice(
+      'failed',
+      '支付状态同步失败',
+      formatRequestError(error, '支付状态获取失败，请稍后再试')
+    )
   }
 }
 
@@ -247,12 +271,14 @@ async function pollPaymentResult(paymentId) {
       if (currentPollToken !== paymentPollToken) return
 
       const currentStatus = payload.payment?.status
-      if (currentStatus === 'success') {
-        hasSuccessfulPayment.value = true
+      if (payload.unlocked || currentStatus === 'success') {
+        hasUnlockedAccess.value = true
         setPaymentNotice(
           'success',
-          '购买已完成',
-          '支付成功，历史结果和后续新结果都会自动解锁。'
+          payload.unlock_method === 'payment' ? '购买已完成' : '结果已解锁',
+          payload.unlock_method === 'payment'
+            ? '支付成功，历史结果和后续新结果都会自动解锁。'
+            : '你的结果访问权限已经生效，历史结果和后续新结果都会自动解锁。'
         )
         showToast({ message: '支付成功，结果已解锁', position: 'bottom' })
         await clearPaymentReturnQuery()
@@ -549,6 +575,11 @@ async function handleLogout() {
   color: var(--color-accent);
 }
 
+.payment-price--unlocked {
+  font-size: 16px;
+  color: #2c7c5c;
+}
+
 .payment-btn {
   width: 100%;
   padding: 14px;
@@ -566,6 +597,10 @@ async function handleLogout() {
 .payment-btn:disabled {
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+.payment-btn[disabled] {
+  background: #2c7c5c;
 }
 
 .payment-btn:active { transform: scale(0.98); }
