@@ -27,6 +27,11 @@ export default async function handler(req, res) {
     }
 
     const alipayConfig = getAlipayConfig(req)
+    if (alipayConfig.publicKeySource !== 'platform') {
+      console.warn(
+        'ALIPAY_PUBLIC_KEY 未配置支付宝公钥，当前回退到了应用公钥。异步回调验签大概率会失败，请替换为沙盒支付宝公钥。'
+      )
+    }
     const signatureValid = verifyAlipaySignature(notifyPayload, alipayConfig.publicKey)
 
     if (!signatureValid) {

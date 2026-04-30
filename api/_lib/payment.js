@@ -46,6 +46,29 @@ function stripTrailingSlash(value = '') {
   return value.replace(/\/+$/, '')
 }
 
+function normalizeEnvValue(value) {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) return ''
+
+  if (
+    (normalized.startsWith('[') && normalized.endsWith(']')) ||
+    (normalized.startsWith('【') && normalized.endsWith('】'))
+  ) {
+    return normalized.slice(1, -1).trim()
+  }
+
+  return normalized
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const normalized = normalizeEnvValue(value)
+    if (normalized) return normalized
+  }
+
+  return ''
+}
+
 function getHeaderValue(headers, key) {
   const value = headers?.[key]
   return Array.isArray(value) ? value[0] : value
@@ -162,37 +185,73 @@ export function parseAlipayTime(value) {
 }
 
 export function resolveSiteBaseUrl(req) {
-  return stripTrailingSlash(process.env.APP_BASE_URL || getRequestOrigin(req))
+  return stripTrailingSlash(firstNonEmpty(process.env.APP_BASE_URL, getRequestOrigin(req)))
 }
 
-export function resolveNotifyBaseUrl(req) {
-  return stripTrailingSlash(process.env.ALIPAY_NOTIFY_BASE_URL || resolveSiteBaseUrl(req))
+export function resolveNotifyUrl(req) {
+  const explicitNotifyUrl = stripTrailingSlash(firstNonEmpty(process.env.ALIPAY_NOTIFY_URL))
+  if (explicitNotifyUrl) return explicitNotifyUrl
+
+  const configuredBaseUrl = stripTrailingSlash(
+    firstNonEmpty(process.env.ALIPAY_NOTIFY_BASE_URL, resolveSiteBaseUrl(req))
+  )
+
+  if (!configuredBaseUrl) return ''
+
+  try {
+    const parsedUrl = new URL(configuredBaseUrl)
+    const normalizedPathname = stripTrailingSlash(parsedUrl.pathname || '')
+
+    if (normalizedPathname.endsWith('/api/payment/notify/alipay')) {
+      return `${parsedUrl.origin}${normalizedPathname}`
+    }
+
+    return `${parsedUrl.origin}/api/payment/notify/alipay`
+  } catch {
+    if (configuredBaseUrl.endsWith('/api/payment/notify/alipay')) {
+      return configuredBaseUrl
+    }
+
+    return `${configuredBaseUrl}/api/payment/notify/alipay`
+  }
 }
 
 export function getAlipayConfig(req) {
-  const appId = process.env.ALIPAY_APP_ID
-  const privateKey = normalizePemKey(process.env.ALIPAY_PRIVATE_KEY, 'PRIVATE KEY')
-  const publicKey = normalizePemKey(process.env.ALIPAY_PUBLIC_KEY, 'PUBLIC KEY')
-  const sellerId = process.env.ALIPAY_SELLER_ID || process.env.ALIPAY_SELLER_USER_ID
-  const gateway = process.env.ALIPAY_GATEWAY || 'https://openapi.alipay.com/gateway.do'
+  const appId = firstNonEmpty(process.env.ALIPAY_APP_ID, process.env.APPID)
+  const privateKey = normalizePemKey(
+    firstNonEmpty(process.env.ALIPAY_PRIVATE_KEY, process.env.ALIPAY_APP_PRIVATE_KEY),
+    'PRIVATE KEY'
+  )
+  const platformPublicKey = firstNonEmpty(
+    process.env.ALIPAY_PUBLIC_KEY,
+    process.env.ALIPAY_PLATFORM_PUBLIC_KEY,
+    process.env.ALIPAY_ALIPAY_PUBLIC_KEY
+  )
+  const appPublicKey = firstNonEmpty(process.env.ALIPAY_APP_PUBLIC_KEY)
+  const publicKey = normalizePemKey(platformPublicKey || appPublicKey, 'PUBLIC KEY')
+  const sellerId = firstNonEmpty(process.env.ALIPAY_SELLER_ID, process.env.ALIPAY_SELLER_USER_ID)
+  const gateway =
+    firstNonEmpty(process.env.ALIPAY_GATEWAY, process.env.ALIPAY_GATEWAY_URL) ||
+    'https://openapi.alipay.com/gateway.do'
   const siteBaseUrl = resolveSiteBaseUrl(req)
-  const notifyBaseUrl = resolveNotifyBaseUrl(req)
+  const notifyUrl = resolveNotifyUrl(req)
 
   if (!appId) throw new Error('Missing environment variable: ALIPAY_APP_ID')
   if (!privateKey) throw new Error('Missing environment variable: ALIPAY_PRIVATE_KEY')
   if (!publicKey) throw new Error('Missing environment variable: ALIPAY_PUBLIC_KEY')
   if (!sellerId) throw new Error('Missing environment variable: ALIPAY_SELLER_ID')
   if (!siteBaseUrl) throw new Error('Missing environment variable: APP_BASE_URL')
-  if (!notifyBaseUrl) throw new Error('Missing environment variable: ALIPAY_NOTIFY_BASE_URL')
+  if (!notifyUrl) throw new Error('Missing environment variable: ALIPAY_NOTIFY_BASE_URL')
 
   return {
     appId,
     privateKey,
     publicKey,
+    publicKeySource: platformPublicKey ? 'platform' : 'app',
     sellerId,
     gateway,
     siteBaseUrl,
-    notifyUrl: `${notifyBaseUrl}/api/payment/notify/alipay`,
+    notifyUrl,
     signType: 'RSA2',
     charset: 'utf-8',
     format: 'JSON',

@@ -8,6 +8,7 @@ const {
   formatAmountFenToYuan,
   formatAlipayTimestamp,
   generateProviderOrderNo,
+  getAlipayConfig,
   signAlipayParams,
   verifyAlipaySignature,
 } = await import('../api/_lib/payment.js')
@@ -59,5 +60,60 @@ describe('payment helpers', () => {
         publicKey
       )
     ).toBe(true)
+  })
+
+  it('normalizes sandbox env aliases and notify URLs', () => {
+    const originalEnv = {
+      APP_BASE_URL: process.env.APP_BASE_URL,
+      ALIPAY_NOTIFY_BASE_URL: process.env.ALIPAY_NOTIFY_BASE_URL,
+      ALIPAY_NOTIFY_URL: process.env.ALIPAY_NOTIFY_URL,
+      ALIPAY_APP_ID: process.env.ALIPAY_APP_ID,
+      APPID: process.env.APPID,
+      ALIPAY_PRIVATE_KEY: process.env.ALIPAY_PRIVATE_KEY,
+      ALIPAY_APP_PRIVATE_KEY: process.env.ALIPAY_APP_PRIVATE_KEY,
+      ALIPAY_PUBLIC_KEY: process.env.ALIPAY_PUBLIC_KEY,
+      ALIPAY_APP_PUBLIC_KEY: process.env.ALIPAY_APP_PUBLIC_KEY,
+      ALIPAY_SELLER_ID: process.env.ALIPAY_SELLER_ID,
+      ALIPAY_GATEWAY: process.env.ALIPAY_GATEWAY,
+    }
+
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    })
+
+    try {
+      delete process.env.ALIPAY_APP_ID
+      delete process.env.ALIPAY_PRIVATE_KEY
+      delete process.env.ALIPAY_PUBLIC_KEY
+      delete process.env.ALIPAY_NOTIFY_URL
+
+      process.env.APPID = 'sandbox-app-id'
+      process.env.APP_BASE_URL = '[https://micro-variety-show.vercel.app]'
+      process.env.ALIPAY_NOTIFY_BASE_URL = 'https://micro-variety-show.vercel.app/user'
+      process.env.ALIPAY_APP_PRIVATE_KEY = privateKey
+      process.env.ALIPAY_APP_PUBLIC_KEY = publicKey
+      process.env.ALIPAY_SELLER_ID = '2088123412341234'
+      process.env.ALIPAY_GATEWAY = 'https://openapi-sandbox.dl.alipaydev.com/gateway.do'
+
+      const config = getAlipayConfig({ headers: {} })
+
+      expect(config.appId).toBe('sandbox-app-id')
+      expect(config.siteBaseUrl).toBe('https://micro-variety-show.vercel.app')
+      expect(config.notifyUrl).toBe('https://micro-variety-show.vercel.app/api/payment/notify/alipay')
+      expect(config.publicKeySource).toBe('app')
+      expect(config.privateKey).toContain('BEGIN PRIVATE KEY')
+      expect(config.publicKey).toContain('BEGIN PUBLIC KEY')
+    } finally {
+      Object.entries(originalEnv).forEach(([key, value]) => {
+        if (value == null) {
+          delete process.env[key]
+          return
+        }
+
+        process.env[key] = value
+      })
+    }
   })
 })
