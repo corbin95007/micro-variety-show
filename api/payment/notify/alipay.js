@@ -2,6 +2,7 @@ import {
   PAYMENT_PROVIDER,
   PAYMENT_STATUS,
   getAlipayConfig,
+  getPaymentRuntimeErrorMessage,
   getPaymentByProviderOrderNo,
   parseAlipayNotifyPayload,
   parseAlipayTime,
@@ -99,6 +100,7 @@ export default async function handler(req, res) {
     await updatePaymentRecord(payment.id, baseFields)
     return sendNotifyText(res, 200, 'success')
   } catch (error) {
+    console.error(getPaymentRuntimeErrorMessage(error, '支付宝异步通知处理失败'))
     return sendNotifyText(res, 500, 'fail')
   }
 }

@@ -42,6 +42,21 @@ const PAYMENT_SELECT_COLUMNS = [
   'failure_reason',
 ].join(', ')
 
+const PAYMENT_SCHEMA_COLUMNS = [
+  'provider',
+  'product_code',
+  'currency',
+  'provider_order_no',
+  'provider_trade_no',
+  'checkout_url',
+  'buyer_id',
+  'buyer_logon_id',
+  'paid_at',
+  'notify_payload',
+  'failure_reason',
+  'updated_at',
+]
+
 function stripTrailingSlash(value = '') {
   return value.replace(/\/+$/, '')
 }
@@ -324,6 +339,24 @@ export function buildAlipayWapPayForm({ req, paymentId, providerOrderNo, product
       sign: signAlipayParams(fields, alipayConfig.privateKey),
     },
   }
+}
+
+export function isPaymentsSchemaMismatch(error) {
+  const message = String(error?.message || '').toLowerCase()
+
+  if (error?.code === '42703') {
+    return PAYMENT_SCHEMA_COLUMNS.some((column) => message.includes(`payments.${column}`))
+  }
+
+  return PAYMENT_SCHEMA_COLUMNS.some((column) => message.includes(`column payments.${column} does not exist`))
+}
+
+export function getPaymentRuntimeErrorMessage(error, fallbackMessage) {
+  if (isPaymentsSchemaMismatch(error)) {
+    return '支付库表还是旧结构。请先在 Supabase SQL Editor 执行 `supabase/migrations/005_expand_payments.sql`，把 payments 表补齐后再发起支付。'
+  }
+
+  return error?.message || fallbackMessage
 }
 
 function normalizeFormObject(body) {

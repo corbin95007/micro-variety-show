@@ -9,6 +9,8 @@ const {
   formatAlipayTimestamp,
   generateProviderOrderNo,
   getAlipayConfig,
+  getPaymentRuntimeErrorMessage,
+  isPaymentsSchemaMismatch,
   signAlipayParams,
   verifyAlipaySignature,
 } = await import('../api/_lib/payment.js')
@@ -115,5 +117,15 @@ describe('payment helpers', () => {
         process.env[key] = value
       })
     }
+  })
+
+  it('turns missing payments columns into an actionable migration error', () => {
+    const error = {
+      code: '42703',
+      message: 'column payments.provider does not exist',
+    }
+
+    expect(isPaymentsSchemaMismatch(error)).toBe(true)
+    expect(getPaymentRuntimeErrorMessage(error, 'fallback')).toContain('005_expand_payments.sql')
   })
 })

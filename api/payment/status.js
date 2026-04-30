@@ -1,4 +1,5 @@
 import {
+  getPaymentRuntimeErrorMessage,
   getLatestPaymentForUser,
   getPaymentForUser,
   toClientPayment,
@@ -52,6 +53,6 @@ export default async function handler(req, res) {
       unlock_method: decision?.method ?? null,
     })
   } catch (error) {
-    return res.status(500).json({ error: error.message || '支付状态查询失败' })
+    return res.status(500).json({ error: getPaymentRuntimeErrorMessage(error, '支付状态查询失败') })
   }
 }

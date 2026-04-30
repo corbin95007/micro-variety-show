@@ -3,6 +3,7 @@ import {
   buildAlipayWapPayForm,
   createPendingPayment,
   generateProviderOrderNo,
+  getPaymentRuntimeErrorMessage,
   getAlipayConfig,
   getPaymentProduct,
   getSuccessfulPaymentForUser,
@@ -53,6 +54,6 @@ export default async function handler(req, res) {
       payment_action: paymentAction,
     })
   } catch (error) {
-    return res.status(500).json({ error: error.message || '创建支付单失败' })
+    return res.status(500).json({ error: getPaymentRuntimeErrorMessage(error, '创建支付单失败') })
   }
 }
