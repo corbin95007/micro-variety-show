@@ -330,13 +330,31 @@ export function buildAlipayWapPayForm({ req, paymentId, providerOrderNo, product
     }),
   }
 
+  const sign = signAlipayParams(fields, alipayConfig.privateKey)
+  const actionParams = new URLSearchParams()
+
+  Object.entries({
+    app_id: fields.app_id,
+    method: fields.method,
+    format: fields.format,
+    charset: fields.charset,
+    sign_type: fields.sign_type,
+    timestamp: fields.timestamp,
+    version: fields.version,
+    notify_url: fields.notify_url,
+    return_url: fields.return_url,
+    sign,
+  }).forEach(([key, value]) => {
+    actionParams.append(key, value)
+  })
+
   return {
     type: 'form',
     method: 'POST',
-    action: alipayConfig.gateway,
+    action: `${alipayConfig.gateway}?${actionParams.toString()}`,
+    accept_charset: alipayConfig.charset,
     fields: {
-      ...fields,
-      sign: signAlipayParams(fields, alipayConfig.privateKey),
+      biz_content: fields.biz_content,
     },
   }
 }

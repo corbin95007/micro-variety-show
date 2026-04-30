@@ -319,6 +319,7 @@ function submitPaymentForm(paymentAction) {
   const form = document.createElement('form')
   form.method = paymentAction.method || 'POST'
   form.action = paymentAction.action
+  form.acceptCharset = paymentAction.accept_charset || 'utf-8'
   form.style.display = 'none'
 
   Object.entries(paymentAction.fields).forEach(([key, value]) => {

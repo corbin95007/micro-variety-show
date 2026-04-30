@@ -5,6 +5,7 @@ process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://example.supabase
 process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key'
 
 const {
+  buildAlipayWapPayForm,
   formatAmountFenToYuan,
   formatAlipayTimestamp,
   generateProviderOrderNo,
@@ -127,5 +128,65 @@ describe('payment helpers', () => {
 
     expect(isPaymentsSchemaMismatch(error)).toBe(true)
     expect(getPaymentRuntimeErrorMessage(error, 'fallback')).toContain('005_expand_payments.sql')
+  })
+
+  it('puts charset into the action query string for wap pay forms', () => {
+    const originalEnv = {
+      APP_BASE_URL: process.env.APP_BASE_URL,
+      ALIPAY_NOTIFY_BASE_URL: process.env.ALIPAY_NOTIFY_BASE_URL,
+      ALIPAY_NOTIFY_URL: process.env.ALIPAY_NOTIFY_URL,
+      ALIPAY_APP_ID: process.env.ALIPAY_APP_ID,
+      ALIPAY_PRIVATE_KEY: process.env.ALIPAY_PRIVATE_KEY,
+      ALIPAY_PUBLIC_KEY: process.env.ALIPAY_PUBLIC_KEY,
+      ALIPAY_SELLER_ID: process.env.ALIPAY_SELLER_ID,
+      ALIPAY_GATEWAY: process.env.ALIPAY_GATEWAY,
+    }
+
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    })
+
+    try {
+      process.env.APP_BASE_URL = 'https://micro-variety-show.vercel.app'
+      process.env.ALIPAY_NOTIFY_BASE_URL = 'https://micro-variety-show.vercel.app'
+      process.env.ALIPAY_NOTIFY_URL = 'https://micro-variety-show.vercel.app/api/payment/notify/alipay'
+      process.env.ALIPAY_APP_ID = 'sandbox-app-id'
+      process.env.ALIPAY_PRIVATE_KEY = privateKey
+      process.env.ALIPAY_PUBLIC_KEY = publicKey
+      process.env.ALIPAY_SELLER_ID = '2088123412341234'
+      process.env.ALIPAY_GATEWAY = 'https://openapi-sandbox.dl.alipaydev.com/gateway.do'
+
+      const form = buildAlipayWapPayForm({
+        req: { headers: {} },
+        paymentId: 1,
+        providerOrderNo: 'ALI20260501000000ABCD1234',
+        product: {
+          amountFen: 990,
+          subject: '微综艺测试结果解锁',
+          description: '一次购买，永久解锁所有测试结果',
+        },
+      })
+
+      const actionUrl = new URL(form.action)
+
+      expect(actionUrl.searchParams.get('charset')).toBe('utf-8')
+      expect(actionUrl.searchParams.get('sign')).toBeTruthy()
+      expect(actionUrl.searchParams.get('app_id')).toBe('sandbox-app-id')
+      expect(form.accept_charset).toBe('utf-8')
+      expect(form.fields.charset).toBeUndefined()
+      expect(form.fields.sign).toBeUndefined()
+      expect(typeof form.fields.biz_content).toBe('string')
+    } finally {
+      Object.entries(originalEnv).forEach(([key, value]) => {
+        if (value == null) {
+          delete process.env[key]
+          return
+        }
+
+        process.env[key] = value
+      })
+    }
   })
 })
