@@ -12,11 +12,13 @@ const {
   getAlipayConfig,
   getPaymentRuntimeErrorMessage,
   isPaymentsSchemaMismatch,
-  reconcilePaymentStatus,
   queryAlipayTrade,
   signAlipayParams,
   verifyAlipaySignature,
 } = await import('../api/_lib/payment.js')
+const {
+  applyUnlockStateToResult,
+} = await import('../api/_lib/unlock.js')
 
 describe('payment helpers', () => {
   it('formats fen amounts for alipay requests', () => {
@@ -280,5 +282,44 @@ describe('payment helpers', () => {
         process.env[key] = value
       })
     }
+  })
+
+  it('forces locked result output when final report access is not granted', () => {
+    const result = applyUnlockStateToResult(
+      {
+        id: 1,
+        is_unlocked: true,
+        unlock_method: 'payment',
+        unlocked_at: '2026-05-01T12:00:00.000Z',
+      },
+      {
+        unlocked: false,
+        method: null,
+        referralCount: 0,
+      }
+    )
+
+    expect(result.is_unlocked).toBe(false)
+    expect(result.unlock_method).toBe(null)
+    expect(result.unlocked_at).toBe(null)
+  })
+
+  it('uses final report access as the only unlock source in result output', () => {
+    const result = applyUnlockStateToResult(
+      {
+        id: 1,
+        is_unlocked: false,
+        unlock_method: null,
+        unlocked_at: null,
+      },
+      {
+        unlocked: true,
+        method: 'payment',
+        referralCount: 0,
+      }
+    )
+
+    expect(result.is_unlocked).toBe(true)
+    expect(result.unlock_method).toBe('payment')
   })
 })

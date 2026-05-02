@@ -191,9 +191,8 @@ async function loadReferralInfo() {
 async function loadLatestPaymentState() {
   try {
     const payload = await getLatestPaymentStatus()
-    const latestPayment = payload.payment
 
-    hasUnlockedAccess.value = Boolean(payload.unlocked || latestPayment?.status === 'success')
+    hasUnlockedAccess.value = Boolean(payload.unlocked)
 
     if (hasUnlockedAccess.value && !route.query.payment_id) {
       setPaymentNotice(
@@ -271,7 +270,7 @@ async function pollPaymentResult(paymentId) {
       if (currentPollToken !== paymentPollToken) return
 
       const currentStatus = payload.payment?.status
-      if (payload.unlocked || currentStatus === 'success') {
+      if (payload.unlocked) {
         hasUnlockedAccess.value = true
         setPaymentNotice(
           'success',

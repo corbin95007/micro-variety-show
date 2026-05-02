@@ -6,11 +6,11 @@ import {
   getPaymentRuntimeErrorMessage,
   getAlipayConfig,
   getPaymentProduct,
-  getSuccessfulPaymentForUser,
   normalizePaymentProvider,
   toClientPayment,
 } from '../_lib/payment.js'
 import { getUserId } from '../_lib/supabase.js'
+import { getUnlockDecision } from '../_lib/unlock.js'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
@@ -26,9 +26,9 @@ export default async function handler(req, res) {
 
     const normalizedProvider = normalizePaymentProvider(provider)
     const product = getPaymentProduct(product_code)
-    const existingPayment = await getSuccessfulPaymentForUser(userId)
+    const unlockDecision = await getUnlockDecision(userId)
 
-    if (existingPayment) {
+    if (unlockDecision.unlocked) {
       return res.status(409).json({ error: '你已完成购买，无需重复支付' })
     }
 

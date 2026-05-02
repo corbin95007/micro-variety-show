@@ -1,5 +1,6 @@
 import { createSign, createVerify, randomBytes } from 'node:crypto'
 import { supabase } from './supabase.js'
+import { setReportUnlocked } from './unlock.js'
 
 export const PAYMENT_PROVIDER = Object.freeze({
   ALIPAY: 'alipay',
@@ -552,11 +553,14 @@ export async function reconcilePaymentStatus({ req, payment }) {
   }
 
   if (payload.trade_status === 'TRADE_SUCCESS' || payload.trade_status === 'TRADE_FINISHED') {
-    return transitionPaymentStatus(payment, PAYMENT_STATUS.SUCCESS, {
+    const updatedPayment = await transitionPaymentStatus(payment, PAYMENT_STATUS.SUCCESS, {
       ...baseFields,
       paid_at: payment.paid_at || parseAlipayTime(payload.send_pay_date) || new Date().toISOString(),
       failure_reason: null,
     })
+
+    await setReportUnlocked(updatedPayment.user_id, true, 'payment')
+    return updatedPayment
   }
 
   if (payload.trade_status === 'TRADE_CLOSED' && payment.status !== PAYMENT_STATUS.SUCCESS) {

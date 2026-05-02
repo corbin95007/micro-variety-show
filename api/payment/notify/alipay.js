@@ -11,6 +11,7 @@ import {
   updatePaymentRecord,
   verifyAlipaySignature,
 } from '../../_lib/payment.js'
+import { setReportUnlocked } from '../../_lib/unlock.js'
 
 function sendNotifyText(res, statusCode, text) {
   res.status(statusCode)
@@ -79,11 +80,13 @@ export default async function handler(req, res) {
     const tradeStatus = notifyPayload.trade_status
 
     if (tradeStatus === 'TRADE_SUCCESS' || tradeStatus === 'TRADE_FINISHED') {
-      await transitionPaymentStatus(payment, PAYMENT_STATUS.SUCCESS, {
+      const updatedPayment = await transitionPaymentStatus(payment, PAYMENT_STATUS.SUCCESS, {
         ...baseFields,
         paid_at: payment.paid_at || parseAlipayTime(notifyPayload.gmt_payment) || new Date().toISOString(),
         failure_reason: null,
       })
+
+      await setReportUnlocked(updatedPayment.user_id, true, 'payment')
 
       return sendNotifyText(res, 200, 'success')
     }
