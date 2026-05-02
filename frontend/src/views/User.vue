@@ -54,9 +54,11 @@
             </div>
 
             <template v-if="hasUsedFriendInvite">
-              <div class="friend-invite-value mono">{{ referralInfo.used_invite_code }}</div>
-              <div v-if="referralInfo.used_inviter_nickname" class="friend-invite-meta">
-                {{ U.friendInviterPrefix }}：{{ referralInfo.used_inviter_nickname }}
+              <div class="friend-invite-summary">
+                <div class="friend-invite-value mono">{{ referralInfo.used_invite_code }}</div>
+                <div v-if="referralInfo.used_inviter_nickname" class="friend-invite-meta">
+                  {{ U.friendInviterPrefix }}：{{ referralInfo.used_inviter_nickname }}
+                </div>
               </div>
             </template>
             <template v-else>
@@ -659,14 +661,15 @@ async function handleLogout() {
 }
 
 .friend-invite-block {
-  margin-top: 16px;
-  padding-top: 16px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--color-divider);
 }
 
 .friend-invite-head {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 12px;
 }
 
@@ -677,10 +680,11 @@ async function handleLogout() {
 }
 
 .friend-invite-helper {
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.5;
   color: var(--color-ink-light);
+  max-width: 220px;
 }
 
 .friend-invite-badge {
@@ -689,18 +693,30 @@ async function handleLogout() {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-height: 28px;
-  padding: 0 10px;
+  height: 24px;
+  margin-top: 1px;
+  padding: 0 9px;
   border-radius: 999px;
-  background: var(--color-primary-soft);
+  background: #f3efff;
   color: var(--color-primary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1;
 }
 
 .friend-invite-badge svg {
   display: block;
+}
+
+.friend-invite-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #faf7ff;
 }
 
 .friend-invite-input {
@@ -753,16 +769,18 @@ async function handleLogout() {
 }
 
 .friend-invite-value {
-  margin-top: 12px;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--color-ink);
+  line-height: 1.2;
 }
 
 .friend-invite-meta {
-  margin-top: 8px;
   font-size: 12px;
   color: var(--color-ink-light);
+  line-height: 1.4;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .copy-btn {
