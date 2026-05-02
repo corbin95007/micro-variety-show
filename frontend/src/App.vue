@@ -9,15 +9,19 @@
       <div class="loading-pulse"></div>
       <span>加载中</span>
     </div>
-    <BottomNav />
+    <BottomNav v-if="showBottomNav" />
   </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import BottomNav from './components/BottomNav.vue'
 
 const auth = useAuthStore()
+const route = useRoute()
+const showBottomNav = computed(() => !auth.loading && !route.meta.hideBottomNav)
 </script>
 
 <style>

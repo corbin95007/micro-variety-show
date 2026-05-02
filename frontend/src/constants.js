@@ -22,7 +22,7 @@ export const TEST_HUB = {
   rulesText: '本测试免费参与，但为了支持团队筹措节目和网站经费，测试结果需要条件解锁。',
   rulesHighlight: '第一期播出后自动解锁。',
   rulesMethodsIntro: '提前解锁方式：',
-  rulesMethod1: '通过底部「分享链接」邀请 3 位好友注册',
+  rulesMethod1: '通过用户中心的邀请链接邀请 3 位好友注册',
   rulesMethod2: '在「用户中心」购买解锁',
 }
 
@@ -45,7 +45,7 @@ export const RESULT = {
   portraitLabel: '你的画像',
   portraitPlaceholder: '画像分析内容将在后续版本中上线。',
   lockedTitle: '结果尚未解锁',
-  lockedDesc: '分享邀请链接或在用户中心购买解锁',
+  lockedDesc: '在用户中心分享邀请链接，或直接购买解锁',
   unlockBtn: '去解锁',
   dimensions: [
     { left: '本土', right: '国际', key: 'dim_local_international' },
@@ -88,6 +88,14 @@ export const USER = {
   inviteCodeLabel: '我的邀请码',
   referralCountLabel: '已邀请人数',
   copyLinkBtn: '复制邀请链接',
+  friendInviteLabel: '填写好友邀请码',
+  friendInvitePlaceholder: '输入好友的邀请码',
+  friendInviteSubmitBtn: '提交邀请码',
+  friendInviteSubmitting: '提交中...',
+  friendInviteHelper: '每个账号只能填写一次，提交后不可修改。',
+  friendInviteBoundLabel: '已填写好友邀请码',
+  friendInviteBoundDesc: '这个账号已经绑定好友邀请关系，不能再次修改。',
+  friendInviterPrefix: '邀请人',
   paymentSectionTitle: '付费解锁',
   paymentTitle: '购买解锁',
   paymentDesc: '一次购买，永久解锁所有测试结果',
@@ -103,14 +111,14 @@ export const UNLOCK_DIALOG = {
   goHomeBtn: '返回主页',
   lockedTitle: '结果尚未解锁',
   lockedDesc: '您可以通过以下方式提前解锁：',
-  method1: '分享邀请链接给 3 位好友注册',
+  method1: '在用户中心复制邀请链接，邀请 3 位好友注册',
   method2: '在用户中心购买解锁',
   unlockBtn: '去解锁',
   laterBtn: '稍后再说',
 }
 
 export const NAV = {
-  share: '分享链接',
+  home: '主页',
   user: '用户中心',
 }
 
@@ -118,8 +126,11 @@ export const TOAST = {
   linkCopied: '链接已复制',
   copyFailed: '复制失败，请手动复制',
   inviteLinkCopied: '邀请链接已复制',
+  friendInviteRequired: '请先填写好友邀请码',
+  friendInviteSubmitted: '好友邀请码已提交',
+  friendInviteSelf: '不能填写自己的邀请码',
   pleaseLogin: '请先登录',
-  notLoggedIn: '您还未登录，登录后才能生成专属邀请链接',
+  notLoggedIn: '请先登录后继续',
   paymentComingSoon: '付费功能即将上线',
   loading: '加载中',
 }

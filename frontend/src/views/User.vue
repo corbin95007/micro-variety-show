@@ -35,6 +35,43 @@
               <span class="referral-count">{{ referralInfo.referral_count }} / {{ referralInfo.target }}</span>
             </div>
           </div>
+          <div class="friend-invite-block">
+            <div class="friend-invite-head">
+              <div>
+                <div class="friend-invite-title">
+                  {{ hasUsedFriendInvite ? U.friendInviteBoundLabel : U.friendInviteLabel }}
+                </div>
+                <div class="friend-invite-helper">
+                  {{ hasUsedFriendInvite ? U.friendInviteBoundDesc : U.friendInviteHelper }}
+                </div>
+              </div>
+              <span v-if="hasUsedFriendInvite" class="friend-invite-badge">已绑定</span>
+            </div>
+
+            <template v-if="hasUsedFriendInvite">
+              <div class="friend-invite-value mono">{{ referralInfo.used_invite_code }}</div>
+              <div v-if="referralInfo.used_inviter_nickname" class="friend-invite-meta">
+                {{ U.friendInviterPrefix }}：{{ referralInfo.used_inviter_nickname }}
+              </div>
+            </template>
+            <template v-else>
+              <input
+                v-model="friendInviteCode"
+                class="friend-invite-input"
+                type="text"
+                :placeholder="U.friendInvitePlaceholder"
+                :disabled="isSubmittingFriendInvite"
+              />
+              <button
+                type="button"
+                class="friend-invite-btn"
+                :disabled="isSubmittingFriendInvite"
+                @click="submitFriendInvite"
+              >
+                {{ isSubmittingFriendInvite ? U.friendInviteSubmitting : U.friendInviteSubmitBtn }}
+              </button>
+            </template>
+          </div>
           <button type="button" class="copy-btn" @click="copyLink">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -47,7 +84,7 @@
       <section v-else class="card-section">
         <div class="info-card guest-card">
           <div class="guest-title">当前未登录</div>
-          <p class="guest-desc">登录后可修改昵称和密码，也能复制你的专属邀请链接。</p>
+          <p class="guest-desc">登录后可修改昵称和密码，也能填写好友邀请码并复制你的专属邀请链接。</p>
           <button type="button" class="guest-login-btn" @click="goLogin">去登录</button>
         </div>
       </section>
@@ -93,7 +130,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { getPaymentStatus, createPayment, getLatestPaymentStatus } from '../api/payment'
-import { getReferralInfo } from '../api/referral'
+import { getReferralInfo, trackReferral } from '../api/referral'
 import { useAuthStore } from '../stores/auth'
 import { formatRequestError } from '../utils/http'
 import { USER as U, TOAST } from '../constants'
@@ -101,7 +138,9 @@ import { USER as U, TOAST } from '../constants'
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
-const referralInfo = ref({ invite_code: '', referral_count: 0, target: 3 })
+const referralInfo = ref(buildEmptyReferralInfo())
+const friendInviteCode = ref('')
+const isSubmittingFriendInvite = ref(false)
 const isCreatingPayment = ref(false)
 const isPollingPayment = ref(false)
 const hasUnlockedAccess = ref(false)
@@ -114,11 +153,14 @@ const paymentNotice = ref({
 let activePaymentId = ''
 let paymentPollToken = 0
 
+const hasUsedFriendInvite = computed(() => Boolean(referralInfo.value.used_invite_code))
+
 watch(
   () => auth.user?.id,
   async (userId) => {
     if (!userId) {
-      referralInfo.value = { invite_code: '', referral_count: 0, target: 3 }
+      referralInfo.value = buildEmptyReferralInfo()
+      friendInviteCode.value = ''
       hasUnlockedAccess.value = false
       paymentPollToken += 1
       activePaymentId = ''
@@ -130,6 +172,14 @@ watch(
       loadReferralInfo(),
       loadLatestPaymentState(),
     ])
+  },
+  { immediate: true }
+)
+
+watch(
+  () => route.query.invite,
+  () => {
+    applyRouteInviteCode()
   },
   { immediate: true }
 )
@@ -180,11 +230,45 @@ const paymentCardBadge = computed(() => (
   hasUnlockedAccess.value ? '已生效' : U.paymentPrice
 ))
 
+function buildEmptyReferralInfo() {
+  return {
+    invite_code: '',
+    referral_count: 0,
+    target: 3,
+    used_invite_code: '',
+    used_inviter_nickname: '',
+  }
+}
+
+function normalizeQueryValue(value) {
+  if (Array.isArray(value)) return value[0] || ''
+  return typeof value === 'string' ? value : ''
+}
+
+function normalizeInviteCode(value) {
+  return normalizeQueryValue(value).trim().toLowerCase()
+}
+
+function applyRouteInviteCode() {
+  if (!auth.user || hasUsedFriendInvite.value) {
+    if (hasUsedFriendInvite.value) {
+      friendInviteCode.value = ''
+    }
+    return
+  }
+
+  const inviteCodeFromRoute = normalizeInviteCode(route.query.invite)
+  if (inviteCodeFromRoute && !friendInviteCode.value) {
+    friendInviteCode.value = inviteCodeFromRoute
+  }
+}
+
 async function loadReferralInfo() {
   try {
     referralInfo.value = await getReferralInfo()
+    applyRouteInviteCode()
   } catch {
-    referralInfo.value = { invite_code: '', referral_count: 0, target: 3 }
+    referralInfo.value = buildEmptyReferralInfo()
   }
 }
 
@@ -238,15 +322,24 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function clearPaymentReturnQuery() {
+async function replaceRouteQueryWithout(keys) {
   const nextQuery = { ...route.query }
-  delete nextQuery.payment_id
-  delete nextQuery.provider
+  keys.forEach((key) => {
+    delete nextQuery[key]
+  })
 
   await router.replace({
     path: route.path,
     query: nextQuery,
   })
+}
+
+async function clearPaymentReturnQuery() {
+  await replaceRouteQueryWithout(['payment_id', 'provider'])
+}
+
+async function clearInvitePrefillQuery() {
+  await replaceRouteQueryWithout(['invite'])
 }
 
 async function pollPaymentResult(paymentId) {
@@ -321,6 +414,35 @@ async function pollPaymentResult(paymentId) {
   }
 }
 
+async function submitFriendInvite() {
+  if (!auth.user || hasUsedFriendInvite.value) return
+
+  const normalizedInviteCode = normalizeInviteCode(friendInviteCode.value)
+  if (!normalizedInviteCode) {
+    showToast({ message: TOAST.friendInviteRequired, position: 'bottom' })
+    return
+  }
+
+  if (normalizedInviteCode === normalizeInviteCode(referralInfo.value.invite_code)) {
+    showToast({ message: TOAST.friendInviteSelf, position: 'bottom' })
+    return
+  }
+
+  isSubmittingFriendInvite.value = true
+
+  try {
+    await trackReferral(normalizedInviteCode)
+    showToast({ message: TOAST.friendInviteSubmitted, position: 'bottom' })
+    await loadReferralInfo()
+    await clearInvitePrefillQuery()
+  } catch (error) {
+    const message = formatRequestError(error, '邀请码提交失败，请稍后再试')
+    showToast({ message, position: 'bottom' })
+  } finally {
+    isSubmittingFriendInvite.value = false
+  }
+}
+
 async function copyLink() {
   if (!auth.user) {
     showToast({ message: TOAST.notLoggedIn, position: 'bottom' })
@@ -382,7 +504,14 @@ async function handlePayment() {
 }
 
 function goLogin() {
-  router.push({ path: '/login', query: { redirect: '/user' } })
+  const inviteCodeFromRoute = normalizeInviteCode(route.query.invite)
+  const nextQuery = { redirect: route.fullPath }
+
+  if (inviteCodeFromRoute) {
+    nextQuery.invite = inviteCodeFromRoute
+  }
+
+  router.push({ path: '/login', query: nextQuery })
 }
 
 async function handleLogout() {
@@ -522,6 +651,103 @@ async function handleLogout() {
   font-weight: 600;
   color: var(--color-ink);
   font-variant-numeric: tabular-nums;
+}
+
+.friend-invite-block {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-divider);
+}
+
+.friend-invite-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.friend-invite-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.friend-invite-helper {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-ink-light);
+}
+
+.friend-invite-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.friend-invite-input {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  background: var(--color-bg);
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.friend-invite-input:focus {
+  border-color: var(--color-primary);
+}
+
+.friend-invite-input::placeholder {
+  color: var(--color-ink-muted);
+}
+
+.friend-invite-input:disabled {
+  opacity: 0.7;
+}
+
+.friend-invite-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.friend-invite-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.friend-invite-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.friend-invite-value {
+  margin-top: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.friend-invite-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-ink-light);
 }
 
 .copy-btn {

@@ -42,10 +42,11 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { formatRequestError, parseApiResponse } from '../utils/http'
+import { trackReferral } from '../api/referral'
+import { formatRequestError } from '../utils/http'
 import { showToast } from 'vant'
 import { LOGIN as L } from '../constants'
 
@@ -53,36 +54,65 @@ const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 
-const isLogin = ref(true)
+const isLogin = ref(!normalizeInviteCode(route.query.invite))
 const email = ref('')
 const password = ref('')
 const nickname = ref('')
-const inviteCode = ref(route.query.invite || '')
+const inviteCode = ref(normalizeInviteCode(route.query.invite))
 const submitting = ref(false)
+
+watch(
+  () => route.query.invite,
+  (value) => {
+    const normalizedInviteCode = normalizeInviteCode(value)
+    if (!normalizedInviteCode) return
+
+    inviteCode.value = normalizedInviteCode
+    isLogin.value = false
+  }
+)
+
+function normalizeQueryValue(value) {
+  if (Array.isArray(value)) return value[0] || ''
+  return typeof value === 'string' ? value : ''
+}
+
+function normalizeInviteCode(value) {
+  return normalizeQueryValue(value).trim().toLowerCase()
+}
+
+function getRedirectPath() {
+  const redirect = normalizeQueryValue(route.query.redirect).trim()
+  return redirect.startsWith('/') ? redirect : '/'
+}
 
 async function handleSubmit() {
   submitting.value = true
   try {
     if (isLogin.value) {
       await auth.login(email.value, password.value)
+      router.push(getRedirectPath())
     } else {
       await auth.register(email.value, password.value, nickname.value)
       if (inviteCode.value) {
-        const token = (await import('../utils/supabase').then(m => m.supabase.auth.getSession())).data.session?.access_token
-        const resp = await fetch('/api/referral/track', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ invite_code: inviteCode.value })
-        })
-        await parseApiResponse(resp, {
-          fallbackMessage: '邀请码提交失败，请稍后再试',
-          unauthorizedMessage: '登录状态已失效，请重新登录',
-        })
+        try {
+          await trackReferral(inviteCode.value)
+        } catch (error) {
+          showToast({
+            message: formatRequestError(error, '注册成功，但邀请码记录失败，请到用户中心补填'),
+            position: 'bottom',
+          })
+          router.push({ path: '/user', query: { invite: inviteCode.value } })
+          return
+        }
       }
+      router.push(getRedirectPath())
     }
-    router.push(route.query.redirect || '/')
   } catch (e) {
-    showToast({ message: formatRequestError(e, '登录失败，请稍后再试'), position: 'bottom' })
+    showToast({
+      message: formatRequestError(e, isLogin.value ? '登录失败，请稍后再试' : '注册失败，请稍后再试'),
+      position: 'bottom',
+    })
   } finally {
     submitting.value = false
   }

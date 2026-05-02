@@ -1,15 +1,14 @@
 <template>
   <div class="bottom-nav-spacer"></div>
   <nav class="bottom-nav">
-    <button type="button" class="nav-item" @click="handleShare">
+    <button type="button" class="nav-item" :class="{ 'is-active': isHomeRoute }" @click="goHome">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+        <path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/>
       </svg>
-      <span>{{ NAV_TEXT.share }}</span>
+      <span>{{ NAV_TEXT.home }}</span>
     </button>
     <div class="nav-divider"></div>
-    <button type="button" class="nav-item" @click="$router.push('/user')">
+    <button type="button" class="nav-item" :class="{ 'is-active': isUserRoute }" @click="goUser">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
       </svg>
@@ -19,24 +18,24 @@
 </template>
 
 <script setup>
-import { useAuthStore } from '../stores/auth'
-import { showToast } from 'vant'
-import { NAV as NAV_TEXT, TOAST } from '../constants'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { NAV as NAV_TEXT } from '../constants'
 
-const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+const isHomeRoute = computed(() => route.path === '/')
+const isUserRoute = computed(() => route.path.startsWith('/user'))
 
-async function handleShare() {
-  if (!auth.user) {
-    showToast({ message: TOAST.notLoggedIn, position: 'bottom' })
-    return
+function goHome() {
+  if (route.path !== '/') {
+    router.push('/')
   }
-  const code = auth.profile?.invite_code || ''
-  const url = `${window.location.origin}/login?invite=${code}`
-  try {
-    await navigator.clipboard.writeText(url)
-    showToast({ message: TOAST.linkCopied, position: 'bottom' })
-  } catch {
-    showToast({ message: TOAST.copyFailed, position: 'bottom' })
+}
+
+function goUser() {
+  if (!route.path.startsWith('/user')) {
+    router.push('/user')
   }
 }
 </script>
@@ -78,6 +77,10 @@ async function handleShare() {
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: color 0.2s ease;
+}
+
+.nav-item.is-active {
+  color: var(--color-primary);
 }
 
 .nav-item:active {
