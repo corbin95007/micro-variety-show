@@ -45,7 +45,12 @@
                   {{ hasUsedFriendInvite ? U.friendInviteBoundDesc : U.friendInviteHelper }}
                 </div>
               </div>
-              <span v-if="hasUsedFriendInvite" class="friend-invite-badge">已绑定</span>
+              <span v-if="hasUsedFriendInvite" class="friend-invite-badge">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M3.5 8.2 6.4 11l6.1-6.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>已绑定</span>
+              </span>
             </div>
 
             <template v-if="hasUsedFriendInvite">
@@ -680,12 +685,22 @@ async function handleLogout() {
 
 .friend-invite-badge {
   flex-shrink: 0;
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 10px;
   border-radius: 999px;
   background: var(--color-primary-soft);
   color: var(--color-primary);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
+}
+
+.friend-invite-badge svg {
+  display: block;
 }
 
 .friend-invite-input {
