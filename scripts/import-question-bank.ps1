@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Resolve-ExistingPath([string]$PathValue) {
@@ -86,7 +87,13 @@ function Get-ColumnIndex([string]$CellReference) {
 }
 
 function New-WorkbookContext([string]$PathValue) {
-  $zip = [System.IO.Compression.ZipFile]::OpenRead($PathValue)
+  $workbookStream = [System.IO.FileStream]::new(
+    $PathValue,
+    [System.IO.FileMode]::Open,
+    [System.IO.FileAccess]::Read,
+    [System.IO.FileShare]::ReadWrite
+  )
+  $zip = [System.IO.Compression.ZipArchive]::new($workbookStream, [System.IO.Compression.ZipArchiveMode]::Read, $false)
 
   function Get-EntryText([string]$EntryPath) {
     $entry = $zip.Entries | Where-Object { $_.FullName -eq $EntryPath } | Select-Object -First 1
@@ -136,6 +143,7 @@ function New-WorkbookContext([string]$PathValue) {
 
   return [pscustomobject]@{
     Zip = $zip
+    WorkbookStream = $workbookStream
     SharedStrings = $sharedStrings
     WorkbookXml = $workbookXml
     WorkbookNs = $workbookNs
@@ -203,51 +211,120 @@ function Read-SheetRows($Context, [string]$SheetName, [int]$ColumnCount) {
   $sheetNs = [System.Xml.XmlNamespaceManager]::new($sheetXml.NameTable)
   $sheetNs.AddNamespace('d', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main')
 
-  $rows = @()
+  $rows = [System.Collections.ArrayList]::new()
   foreach ($rowNode in $sheetXml.SelectNodes('//d:sheetData/d:row', $sheetNs)) {
-    $values = New-Object object[] $ColumnCount
+    $cells = @{}
 
     foreach ($cell in $rowNode.SelectNodes('./d:c', $sheetNs)) {
       $columnIndex = Get-ColumnIndex $cell.GetAttribute('r')
       if ($columnIndex -le $ColumnCount) {
-        $values[$columnIndex - 1] = Read-CellValue $cell $sheetNs $Context.SharedStrings
+        $cells[$columnIndex - 1] = Read-CellValue $cell $sheetNs $Context.SharedStrings
       }
     }
 
-    $rows += ,$values
+    [void]$rows.Add([pscustomobject]@{
+      Cells = $cells
+      ColumnCount = $ColumnCount
+    })
   }
 
-  return $rows
+  return [pscustomobject]@{
+    Rows = $rows
+  }
+}
+
+function Get-HeaderMap {
+  param($HeaderRow)
+
+  $headers = @{}
+
+  for ($i = 0; $i -lt $HeaderRow.ColumnCount; $i++) {
+    $header = ConvertTo-NullableText $HeaderRow.Cells[$i]
+    if ($header) {
+      $headers[$header] = $i
+    }
+  }
+
+  return $headers
+}
+
+function Get-RequiredColumn($HeaderMap, [string[]]$Names, [string]$SheetName) {
+  foreach ($name in $Names) {
+    if ($HeaderMap.ContainsKey($name)) {
+      return $HeaderMap[$name]
+    }
+  }
+
+  throw "工作表 $SheetName 缺少必需列: $($Names -join ' / ')"
+}
+
+function Get-OptionalColumn($HeaderMap, [string[]]$Names) {
+  foreach ($name in $Names) {
+    if ($HeaderMap.ContainsKey($name)) {
+      return $HeaderMap[$name]
+    }
+  }
+
+  return $null
+}
+
+function Get-RowValue($Row, $ColumnIndex) {
+  if ($null -eq $ColumnIndex) {
+    return $null
+  }
+
+  if ($ColumnIndex -lt 0 -or $ColumnIndex -ge $Row.ColumnCount) {
+    return $null
+  }
+
+  return $Row.Cells[$ColumnIndex]
 }
 
 function Get-QuestionRecords($Context) {
-  $rows = Read-SheetRows $Context '题库与发分表' 12
+  $rows = (Read-SheetRows $Context '题库与发分表' 12).Rows
+  if ($rows.Count -eq 0) {
+    return @()
+  }
+
+  $headers = Get-HeaderMap -HeaderRow ($rows[0])
+  $sortOrderColumn = Get-RequiredColumn -HeaderMap $headers -Names @('题目编号', '序号') -SheetName '题库与发分表'
+  $questionTextColumn = Get-RequiredColumn -HeaderMap $headers -Names @('题目', '题目文本') -SheetName '题库与发分表'
+  $dimension1Column = Get-RequiredColumn -HeaderMap $headers -Names @('影响维度1', '维度1') -SheetName '题库与发分表'
+  $weight1Column = Get-RequiredColumn -HeaderMap $headers -Names @('维度1权重', '权重1') -SheetName '题库与发分表'
+  $dimension2Column = Get-OptionalColumn -HeaderMap $headers -Names @('影响维度2', '维度2')
+  $weight2Column = Get-OptionalColumn -HeaderMap $headers -Names @('维度2权重', '权重2')
+  $stronglyAgreeColumn = Get-RequiredColumn -HeaderMap $headers -Names @('【极度赞同】触发标签', '极度赞同触发标签') -SheetName '题库与发分表'
+  $agreeColumn = Get-RequiredColumn -HeaderMap $headers -Names @('【部分赞同】触发标签', '部分赞同触发标签') -SheetName '题库与发分表'
+  $neutralColumn = Get-RequiredColumn -HeaderMap $headers -Names @('【中立】触发标签', '中立触发标签') -SheetName '题库与发分表'
+  $disagreeColumn = Get-RequiredColumn -HeaderMap $headers -Names @('【部分不赞同】触发标签', '部分不赞同触发标签') -SheetName '题库与发分表'
+  $stronglyDisagreeColumn = Get-RequiredColumn -HeaderMap $headers -Names @('【极度不赞同】触发标签', '极度不赞同触发标签') -SheetName '题库与发分表'
+
   $records = @()
 
   for ($i = 1; $i -lt $rows.Count; $i++) {
     $row = $rows[$i]
-    $sortOrder = ConvertTo-NumberOrNull $row[0]
-    $questionText = ConvertTo-NullableText $row[1]
+    $sortOrder = ConvertTo-NumberOrNull (Get-RowValue $row $sortOrderColumn)
+    $questionText = ConvertTo-NullableText (Get-RowValue $row $questionTextColumn)
 
     if ($null -eq $sortOrder -or $null -eq $questionText) {
       continue
     }
 
-    $dimension1 = ConvertTo-NullableText $row[2]
-    $dimension2 = ConvertTo-NullableText $row[4]
+    $dimension1 = ConvertTo-NullableText (Get-RowValue $row $dimension1Column)
+    $dimension2 = ConvertTo-NullableText (Get-RowValue $row $dimension2Column)
 
     $records += [ordered]@{
       question_text = $questionText
       sort_order = $sortOrder
       dimension1 = $dimension1
-      weight1 = Get-WeightOrDefault $dimension1 $row[3]
+      weight1 = Get-WeightOrDefault $dimension1 (Get-RowValue $row $weight1Column)
       dimension2 = $dimension2
-      weight2 = Get-WeightOrDefault $dimension2 $row[5]
-      tag_strongly_agree = ConvertTo-NullableText $row[6]
-      tag_agree = ConvertTo-NullableText $row[7]
-      tag_neutral = ConvertTo-NullableText $row[8]
-      tag_disagree = ConvertTo-NullableText $row[9]
-      tag_strongly_disagree = ConvertTo-NullableText $row[10]
+      weight2 = Get-WeightOrDefault $dimension2 (Get-RowValue $row $weight2Column)
+      tag_strongly_agree = ConvertTo-NullableText (Get-RowValue $row $stronglyAgreeColumn)
+      tag_agree = ConvertTo-NullableText (Get-RowValue $row $agreeColumn)
+      tag_neutral = ConvertTo-NullableText (Get-RowValue $row $neutralColumn)
+      tag_disagree = ConvertTo-NullableText (Get-RowValue $row $disagreeColumn)
+      tag_strongly_disagree = ConvertTo-NullableText (Get-RowValue $row $stronglyDisagreeColumn)
     }
   }
 
@@ -255,13 +332,20 @@ function Get-QuestionRecords($Context) {
 }
 
 function Get-TagThresholds($Context) {
-  $rows = Read-SheetRows $Context '标签结算核对表' 3
+  $rows = (Read-SheetRows $Context '标签结算核对表' 4).Rows
+  if ($rows.Count -eq 0) {
+    return @{}
+  }
+
+  $headers = Get-HeaderMap -HeaderRow ($rows[0])
+  $tagNameColumn = Get-RequiredColumn -HeaderMap $headers -Names @('最终标签名', '标签名') -SheetName '标签结算核对表'
+  $minScoreColumn = Get-RequiredColumn -HeaderMap $headers -Names @('触发该标签的最低要求分数', '最低要求分数', '最低分数') -SheetName '标签结算核对表'
   $records = @{}
 
   for ($i = 1; $i -lt $rows.Count; $i++) {
     $row = $rows[$i]
-    $tagName = ConvertTo-NullableText $row[1]
-    $minScore = ConvertTo-NumberOrNull $row[2]
+    $tagName = ConvertTo-NullableText (Get-RowValue $row $tagNameColumn)
+    $minScore = ConvertTo-NumberOrNull (Get-RowValue $row $minScoreColumn)
 
     if ($tagName -and $null -ne $minScore) {
       $records[$tagName] = $minScore
@@ -325,5 +409,8 @@ try {
 } finally {
   if ($context -and $context.Zip) {
     $context.Zip.Dispose()
+  }
+  if ($context -and $context.WorkbookStream) {
+    $context.WorkbookStream.Dispose()
   }
 }

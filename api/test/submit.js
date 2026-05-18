@@ -2,6 +2,28 @@ import { supabase, getUserId } from '../_lib/supabase.js'
 import { calculateScores, assignTags } from '../_lib/scoring.js'
 import { getUnlockDecision } from '../_lib/unlock.js'
 
+function formatSupabaseError(stage, error) {
+  return {
+    error: error?.message ?? 'Unknown Supabase error',
+    stage,
+    message: error?.message ?? null,
+    code: error?.code ?? null,
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+  }
+}
+
+function buildSubmitLogSummary({ userId, questions, answers, scores, tags, unlockDecision }) {
+  return {
+    userIdPrefix: userId ? userId.slice(0, 8) : null,
+    questionCount: Array.isArray(questions) ? questions.length : 0,
+    answeredCount: answers && typeof answers === 'object' ? Object.keys(answers).length : 0,
+    scoreKeys: scores && typeof scores === 'object' ? Object.keys(scores) : [],
+    tagsIsArray: Array.isArray(tags),
+    unlockMethod: unlockDecision?.method ?? null,
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
@@ -13,18 +35,19 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: '缺少答案数据' })
   }
 
-  const [
-    { data: questions, error: questionsError },
-    unlockDecision,
-  ] = await Promise.all([
-    supabase
-      .from('tests')
-      .select('*'),
-    getUnlockDecision(userId),
-  ])
+  const { data: questions, error: questionsError } = await supabase
+    .from('tests')
+    .select('*')
 
   if (questionsError) {
-    return res.status(500).json({ error: questionsError.message })
+    return res.status(500).json(formatSupabaseError('load_questions', questionsError))
+  }
+
+  let unlockDecision = { unlocked: false, method: null }
+  try {
+    unlockDecision = await getUnlockDecision(userId)
+  } catch (error) {
+    console.error('Failed to resolve unlock decision during test submit:', error)
   }
 
   const scores = calculateScores(questions, answers)
@@ -41,12 +64,33 @@ export default async function handler(req, res) {
     insertPayload.unlocked_at = new Date().toISOString()
   }
 
+  const insertSummary = buildSubmitLogSummary({
+    userId,
+    questions,
+    answers,
+    scores,
+    tags,
+    unlockDecision,
+  })
+
+  console.log('Submitting test result:', insertSummary)
+
   const { data, error } = await supabase
     .from('test_results')
     .insert(insertPayload)
     .select()
     .single()
 
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) {
+    console.error('Failed to insert test result:', {
+      ...insertSummary,
+      message: error.message,
+      code: error.code ?? null,
+      details: error.details ?? null,
+      hint: error.hint ?? null,
+    })
+    return res.status(500).json(formatSupabaseError('insert_result', error))
+  }
+  console.log('Inserted test result:', insertSummary)
   res.json(data)
 }

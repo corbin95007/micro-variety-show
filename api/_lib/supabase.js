@@ -16,9 +16,31 @@ export const supabase = createClient(
   supabaseServiceRoleKey
 )
 
+function getAuthLogSummary(req, token, userId = null) {
+  return {
+    hasAuthHeader: Boolean(req.headers.authorization),
+    tokenLength: token ? token.length : 0,
+    tokenPrefix: token ? token.slice(0, 8) : null,
+    userIdPrefix: userId ? userId.slice(0, 8) : null,
+  }
+}
+
 export async function getUserId(req) {
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return null
-  const { data } = await supabase.auth.getUser(token)
-  return data?.user?.id ?? null
+  const { data, error } = await supabase.auth.getUser(token)
+
+  if (error) {
+    console.error('Failed to resolve Supabase user:', {
+      ...getAuthLogSummary(req, token),
+      message: error.message,
+      code: error.code ?? null,
+      status: error.status ?? null,
+    })
+    return null
+  }
+
+  const userId = data?.user?.id ?? null
+  console.log('Resolved Supabase user:', getAuthLogSummary(req, token, userId))
+  return userId
 }

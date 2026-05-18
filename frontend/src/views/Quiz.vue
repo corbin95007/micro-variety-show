@@ -46,7 +46,7 @@
               'is-disagree': opt.value <= 2 && testStore.answers[q.id] === opt.value,
               'is-neutral': opt.value === 3 && testStore.answers[q.id] === opt.value,
             }"
-            @click="testStore.setAnswer(q.id, opt.value)"
+            @click="testStore.setAnswerAndSave(q.id, opt.value, auth.user?.id)"
           >
             <span class="option-dot"></span>
             <span class="option-label">{{ opt.label }}</span>
@@ -107,8 +107,7 @@ const progress = computed(() =>
 
 onMounted(() => {
   if (!auth.user) return
-  testStore.reset()
-  testStore.fetchQuestions()
+  testStore.fetchQuestions(auth.user.id)
 })
 
 function goLogin() {
@@ -122,13 +121,14 @@ async function handleSubmit() {
     const resp = await fetch('/api/test/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ answers: testStore.answers }),
+      body: JSON.stringify({ answers: { ...testStore.answers } }),
     })
     const result = await parseApiResponse(resp, {
       fallbackMessage: '提交失败',
       unauthorizedMessage: '登录状态已失效，请重新登录',
     })
     resultId.value = result.id
+    testStore.clearDraft(auth.user?.id)
 
     const unlockResp = await fetch('/api/unlock/check', {
       method: 'POST',
@@ -266,11 +266,14 @@ async function handleSubmit() {
 
 .options-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .option-btn {
-  flex: 1;
+  flex: 1 1 calc(20% - 6px);
+  min-width: 56px;
+  min-height: 58px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -296,8 +299,10 @@ async function handleSubmit() {
 
 .option-label {
   font-size: 10px;
+  line-height: 1.35;
+  text-align: center;
   color: var(--color-ink-light);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   transition: color 0.2s ease;
 }
 

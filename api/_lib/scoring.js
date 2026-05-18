@@ -7,16 +7,23 @@ const DIMENSION_MAP = {
   '加速主义-改良主义': 'accel_reform',
   '激进改革': 'accel_reform',
   '平等主义-优绩主义': 'equal_merit',
+  '平等主义-本质主义': 'equal_merit',
   '平等精英': 'equal_merit'
 }
 
 const DIMENSIONS = Object.values(DIMENSION_MAP)
 const DEFAULT_TAG_THRESHOLD = 3
 const TAG_THRESHOLDS = {
-  '马派女权': 4,
-  '辱男词推广大使': 2,
-  '平权主义': 4,
-  '女同女权': 4,
+  '马派女权': 6,
+  '辱男词推广大使': 4,
+  '平权主义': 6,
+  '女同女权': 6,
+  '国际激进女权主义': 6,
+  '绝望的直女': 6,
+  '社会达尔文主义': 6,
+  '反宗教': 2,
+  '实干主义派': 6,
+  '后现代女权主义': 6,
 }
 
 // 用户选择到系数的映射（5点量表）
@@ -47,7 +54,7 @@ function parseTagPairs(rawTags) {
     .map(segment => segment.trim())
     .filter(Boolean)
     .map(segment => {
-      const match = segment.match(/^(.+?)[：:]([+-]?\d+)$/)
+      const match = segment.match(/^(.+?)[：:]\s*([+-]?\d+)(?:\s*分)?$/)
       if (!match) return null
 
       return {
