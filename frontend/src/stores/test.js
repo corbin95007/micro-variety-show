@@ -15,6 +15,23 @@ export const useTestStore = defineStore('test', () => {
     return `${DRAFT_PREFIX}${userId || 'guest'}`
   }
 
+  function getAllDraftKeys(userId) {
+    const keys = new Set([getDraftKey(userId), getDraftKey('guest')])
+
+    try {
+      const storedKeys = []
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const key = window.localStorage.key(i)
+        if (key?.startsWith(DRAFT_PREFIX)) storedKeys.push(key)
+      }
+      storedKeys.forEach((key) => keys.add(key))
+    } catch (error) {
+      console.warn('Failed to scan test draft keys:', error)
+    }
+
+    return [...keys]
+  }
+
   function readDraft(userId) {
     try {
       const rawDraft = window.localStorage.getItem(getDraftKey(userId))
@@ -41,6 +58,14 @@ export const useTestStore = defineStore('test', () => {
 
   function clearStoredDraft(userId) {
     window.localStorage.removeItem(getDraftKey(userId))
+  }
+
+  function clearStoredDrafts(userId) {
+    const draftKeys = getAllDraftKeys(userId)
+    draftKeys.forEach((key) => {
+      window.localStorage.removeItem(key)
+    })
+    return draftKeys.length
   }
 
   function isValidDraftQuestion(question) {
@@ -79,6 +104,21 @@ export const useTestStore = defineStore('test', () => {
       console.warn('Failed to clear test draft:', error)
     }
     draftRestored.value = false
+  }
+
+  function resetTestData(userId, options = {}) {
+    try {
+      clearStoredDrafts(userId)
+    } catch (error) {
+      console.warn('Failed to reset test drafts:', error)
+      clearDraft(userId)
+      clearDraft('guest')
+    }
+    answers.value = {}
+    draftRestored.value = false
+    if (options.clearQuestions) {
+      questions.value = []
+    }
   }
 
   function shuffleQuestions(items) {
@@ -140,6 +180,7 @@ export const useTestStore = defineStore('test', () => {
     setAnswerAndSave,
     saveDraft,
     clearDraft,
+    resetTestData,
     reset,
   }
 })

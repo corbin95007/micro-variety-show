@@ -105,22 +105,19 @@ cd "D:\qzm的文档\企划\微综艺\micro-variety-show"
 npm test
 ```
 
-### 5.2 启动前端开发服务器
+### 5.2 一键启动本地开发环境
 ```bash
-cd frontend
-npm run dev
+cd "D:\qzm的文档\企划\微综艺\micro-variety-show"
+npm run dev:local
 ```
-访问 http://localhost:5173
+访问 http://localhost:5173，API 会同时运行在 http://localhost:3000。
 
-### 5.3 启动后端API（需要Vercel CLI）
+### 5.3 后端API依赖（需要Vercel CLI）
 ```bash
 # 安装Vercel CLI（如果还没安装）
 npm install -g vercel
-
-# 在项目根目录启动
-cd "D:\qzm的文档\企划\微综艺\micro-variety-show"
-vercel dev
 ```
+正常本地开发使用 `npm run dev:local`，脚本会复用 `npm run dev:api` 的本地 API 启动和清代理逻辑。
 
 ---
 

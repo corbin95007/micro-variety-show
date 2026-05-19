@@ -64,8 +64,26 @@
 
         <section v-if="result.tags?.length" class="tags-section">
           <div class="section-label">{{ R.tagsLabel }}</div>
-          <div class="tags-card">
-            <span v-for="tag in result.tags" :key="tag" class="tag-pill">{{ tag }}</span>
+          <div class="tags-linkage">
+            <div class="tags-card" role="tablist" aria-label="特殊标签">
+              <button
+                v-for="tag in result.tags"
+                :key="tag"
+                type="button"
+                class="tag-pill"
+                :class="{ 'is-active': activeTag === tag }"
+                @click="setActiveTag(tag)"
+              >
+                {{ tag }}
+              </button>
+            </div>
+
+            <Transition name="tag-meaning" mode="out-in">
+              <div :key="activeTag" class="tag-meaning-panel">
+                <div class="tag-meaning-title">{{ activeTag }}</div>
+                <div class="tag-meaning-text">{{ getTagMeaning(activeTag) }}</div>
+              </div>
+            </Transition>
           </div>
         </section>
 
@@ -107,12 +125,13 @@ import { useAuthStore } from '../stores/auth'
 import { supabase } from '../utils/supabase'
 import { formatRequestError, parseApiResponse } from '../utils/http'
 import SpectrumBar from '../components/SpectrumBar.vue'
-import { RESULT as R } from '../constants'
+import { RESULT as R, RESULT_TAG_MEANINGS } from '../constants'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const result = ref(null)
+const activeTag = ref('')
 const loading = ref(true)
 const errorMessage = ref('')
 const errorAction = ref('retry')
@@ -130,6 +149,14 @@ function formatDate(iso) {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function getTagMeaning(tag) {
+  return RESULT_TAG_MEANINGS[tag] || '该标签由题库中的阈值规则触发，表示你在对应议题上的附加侧写。'
+}
+
+function setActiveTag(tag) {
+  activeTag.value = tag
 }
 
 async function loadResult() {
@@ -162,6 +189,7 @@ async function loadResult() {
       unauthorizedMessage: '登录状态已失效，请重新登录',
       notFoundMessage: '未找到这份测试结果',
     })
+    activeTag.value = result.value?.tags?.[0] || ''
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === '登录状态已失效，请重新登录') {
@@ -278,22 +306,77 @@ onMounted(loadResult)
 
 .tags-section { padding-top: 28px; }
 
+.tags-linkage {
+  display: grid;
+  gap: 12px;
+  padding: 0 20px;
+}
+
 .tags-card {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 20px;
 }
 
 .tag-pill {
-  display: inline-block;
+  appearance: none;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
   padding: 8px 18px;
-  background: var(--color-primary);
-  color: #fff;
+  background: var(--color-surface);
+  color: var(--color-ink-light);
   border-radius: 100px;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.03em;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tag-pill.is-active {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-elevated);
+  transform: translateY(-1px);
+}
+
+.tag-meaning-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  overflow: hidden;
+}
+
+.tag-meaning-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-ink);
+  margin-bottom: 6px;
+}
+
+.tag-meaning-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-ink-light);
+}
+
+.tag-meaning-enter-active,
+.tag-meaning-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.tag-meaning-enter-from {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.tag-meaning-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
 }
 
 .portrait-section { padding-top: 28px; padding-bottom: 100px; }
@@ -354,6 +437,7 @@ onMounted(loadResult)
   font-weight: 600;
   font-family: var(--font-body);
   cursor: pointer;
+  transition: transform 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease;
 }
 
 .unlock-btn:active { transform: scale(0.98); opacity: 0.9; }

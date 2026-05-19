@@ -1,5 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
+$root = Resolve-Path (Join-Path $PSScriptRoot '..')
+$serverScript = Join-Path $root 'scripts\dev-api-server.mjs'
+
 $proxyVars = @(
   'ALL_PROXY',
   'all_proxy',
@@ -17,10 +20,14 @@ foreach ($name in $proxyVars) {
   }
 }
 
-$vercel = Get-Command vercel -ErrorAction SilentlyContinue
-if (-not $vercel) {
-  throw '未找到 vercel 命令，请先执行 npm install -g vercel'
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) {
+  throw '未找到 node 命令，请先安装 Node.js'
 }
 
-Write-Host 'Starting local API on http://localhost:3000 ...'
-vercel dev --listen 3000
+if (-not (Test-Path $serverScript)) {
+  throw "未找到本地 API server: $serverScript"
+}
+
+Write-Host 'Starting local API on http://127.0.0.1:3000 ...'
+& $node.Source $serverScript
