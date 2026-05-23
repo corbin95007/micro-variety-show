@@ -152,7 +152,7 @@ function formatDate(iso) {
 }
 
 function getTagMeaning(tag) {
-  return RESULT_TAG_MEANINGS[tag] || '该标签由题库中的阈值规则触发，表示你在对应议题上的附加侧写。'
+  return report.value?.tagMeanings?.[tag] || RESULT_TAG_MEANINGS[tag] || '该标签由题库中的阈值规则触发，表示你在对应议题上的附加侧写。'
 }
 
 function setActiveTag(tag) {
@@ -362,6 +362,7 @@ onMounted(loadResult)
   font-size: 13px;
   line-height: 1.7;
   color: var(--color-ink-light);
+  white-space: pre-line;
 }
 
 .tag-meaning-enter-active,
@@ -405,6 +406,7 @@ onMounted(loadResult)
   color: var(--color-ink-light);
   font-size: 14px;
   line-height: 1.8;
+  white-space: pre-line;
 }
 
 .locked-state {
