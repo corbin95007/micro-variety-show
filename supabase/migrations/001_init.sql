@@ -112,6 +112,7 @@ alter table public.profiles enable row level security;
 
 drop policy if exists "profiles_select_own" on public.profiles;
 drop policy if exists "profiles_select_by_invite_code" on public.profiles;
+drop policy if exists "profiles_select_all" on public.profiles;
 create policy "profiles_select_all" on public.profiles
   for select using (true);
 -- 注意：profiles表只暴露 id/nickname/invite_code，不含敏感信息，允许公开读取

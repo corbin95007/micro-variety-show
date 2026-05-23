@@ -10,6 +10,7 @@ export const useTestStore = defineStore('test', () => {
   const answers = ref({})
   const loading = ref(false)
   const draftRestored = ref(false)
+  let draftUploadController = null
 
   function getDraftKey(userId) {
     return `${DRAFT_PREFIX}${userId || 'guest'}`
@@ -56,6 +57,41 @@ export const useTestStore = defineStore('test', () => {
     }
   }
 
+  function buildDraft() {
+    return {
+      version: DRAFT_VERSION,
+      updatedAt: new Date().toISOString(),
+      questions: questions.value,
+      answers: { ...answers.value },
+    }
+  }
+
+  function isValidDraft(draft) {
+    return (
+      draft?.version === DRAFT_VERSION &&
+      Array.isArray(draft.questions) &&
+      draft.questions.every(isValidDraftQuestion) &&
+      draft.answers &&
+      typeof draft.answers === 'object' &&
+      !Array.isArray(draft.answers)
+    )
+  }
+
+  function normalizeDraftResponse(payload) {
+    if (!payload) return null
+    const draft = payload.draft || payload
+    const normalized = {
+      version: DRAFT_VERSION,
+      updatedAt: draft.updatedAt || null,
+      questions: draft.questions,
+      answers: draft.answers,
+    }
+    if (!normalized.updatedAt && normalized.questions?.length === 0 && Object.keys(normalized.answers || {}).length === 0) {
+      return null
+    }
+    return isValidDraft(normalized) ? normalized : null
+  }
+
   function clearStoredDraft(userId) {
     window.localStorage.removeItem(getDraftKey(userId))
   }
@@ -83,17 +119,95 @@ export const useTestStore = defineStore('test', () => {
     if (!userId || questions.value.length === 0) return
 
     try {
-      const draft = {
-        version: DRAFT_VERSION,
-        updatedAt: new Date().toISOString(),
-        questions: questions.value,
-        answers: { ...answers.value },
-      }
-
-      window.localStorage.setItem(getDraftKey(userId), JSON.stringify(draft))
+      window.localStorage.setItem(getDraftKey(userId), JSON.stringify(buildDraft()))
     } catch (error) {
       console.warn('Failed to save test draft:', error)
     }
+  }
+
+  async function getAuthToken() {
+    const { data } = await supabase.auth.getSession()
+    return data.session?.access_token || ''
+  }
+
+  async function requestCloudDraft(method, { draft, signal } = {}) {
+    const token = await getAuthToken()
+    if (!token) throw new Error('Missing auth token')
+
+    const resp = await fetch('/api/test/draft', {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: draft
+        ? JSON.stringify({
+            questions: draft.questions,
+            answers: draft.answers,
+            updatedAt: draft.updatedAt,
+          })
+        : undefined,
+      signal,
+    })
+
+    if (resp.status === 204 || resp.status === 404) return null
+    if (!resp.ok) throw new Error(`Draft ${method} failed: ${resp.status}`)
+
+    const text = await resp.text()
+    if (!text.trim()) return null
+
+    return JSON.parse(text)
+  }
+
+  async function readCloudDraft(userId) {
+    if (!userId) return null
+
+    try {
+      const payload = await requestCloudDraft('GET')
+      return normalizeDraftResponse(payload)
+    } catch (error) {
+      console.warn('Failed to load cloud test draft:', error)
+      return null
+    }
+  }
+
+  function uploadDraftInBackground(userId) {
+    if (!userId || questions.value.length === 0) return
+
+    if (draftUploadController) {
+      draftUploadController.abort()
+    }
+
+    const controller = new AbortController()
+    draftUploadController = controller
+    const draft = buildDraft()
+
+    requestCloudDraft('PUT', { draft, signal: controller.signal })
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          console.warn('Failed to upload test draft:', error)
+        }
+      })
+      .finally(() => {
+        if (draftUploadController === controller) {
+          draftUploadController = null
+        }
+      })
+  }
+
+  function deleteCloudDraftInBackground(userId) {
+    if (!userId) return
+
+    if (draftUploadController) {
+      draftUploadController.abort()
+      draftUploadController = null
+    }
+
+    requestCloudDraft('DELETE').catch((error) => {
+      if (error?.name !== 'AbortError') {
+        console.warn('Failed to delete cloud test draft:', error)
+      }
+    })
   }
 
   function clearDraft(userId) {
@@ -103,6 +217,7 @@ export const useTestStore = defineStore('test', () => {
     } catch (error) {
       console.warn('Failed to clear test draft:', error)
     }
+    deleteCloudDraftInBackground(userId)
     draftRestored.value = false
   }
 
@@ -114,6 +229,7 @@ export const useTestStore = defineStore('test', () => {
       clearDraft(userId)
       clearDraft('guest')
     }
+    deleteCloudDraftInBackground(userId)
     answers.value = {}
     draftRestored.value = false
     if (options.clearQuestions) {
@@ -135,7 +251,7 @@ export const useTestStore = defineStore('test', () => {
   async function fetchQuestions(userId) {
     loading.value = true
     try {
-      const draft = readDraft(userId)
+      const draft = (await readCloudDraft(userId)) || readDraft(userId)
       if (draft) {
         questions.value = draft.questions
         answers.value = { ...draft.answers }
@@ -160,6 +276,7 @@ export const useTestStore = defineStore('test', () => {
   function setAnswerAndSave(questionId, value, userId) {
     setAnswer(questionId, value)
     saveDraft(userId)
+    uploadDraftInBackground(userId)
   }
 
   function reset(options = {}) {
