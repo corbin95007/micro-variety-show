@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { getSafeLoginRedirectPath, sanitizeInviteCode } from '../utils/authRedirects'
 
 const routes = [
   { path: '/', component: () => import('../views/Home.vue') },
@@ -7,6 +8,7 @@ const routes = [
   { path: '/forgot-password', component: () => import('../views/ForgotPassword.vue'), meta: { hideBottomNav: true } },
   { path: '/reset-password', component: () => import('../views/ResetPassword.vue'), meta: { hideBottomNav: true } },
   { path: '/auth/callback', component: () => import('../views/AuthCallback.vue'), meta: { hideBottomNav: true } },
+  { path: '/auth/session', component: () => import('../views/AuthSession.vue'), meta: { hideBottomNav: true } },
   { path: '/test', component: () => import('../views/TestHub.vue') },
   { path: '/test/quiz', component: () => import('../views/Quiz.vue'), meta: { hideBottomNav: true } },
   { path: '/test/result/:id', component: () => import('../views/Result.vue') },
@@ -20,23 +22,18 @@ const router = createRouter({
   routes,
 })
 
-function normalizeQueryValue(value) {
-  if (Array.isArray(value)) return value[0] || ''
-  return typeof value === 'string' ? value : ''
-}
-
 router.beforeEach((to) => {
   const auth = useAuthStore()
 
   // 已登录用户访问登录页 → 优先回原目标；带邀请码时改去用户中心填写
   if (to.path === '/login' && !auth.loading && auth.user) {
-    const inviteCode = normalizeQueryValue(to.query.invite).trim().toLowerCase()
+    const inviteCode = sanitizeInviteCode(to.query.invite)
     if (inviteCode) {
       return { path: '/user', query: { invite: inviteCode } }
     }
 
-    const redirect = normalizeQueryValue(to.query.redirect).trim()
-    if (redirect.startsWith('/') && redirect !== '/login') {
+    const redirect = getSafeLoginRedirectPath(to.query)
+    if (redirect !== '/') {
       return redirect
     }
 

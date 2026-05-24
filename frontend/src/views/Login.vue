@@ -10,7 +10,7 @@
       <h1 class="login-title">{{ isRegister ? L.registerTitle : L.loginTitle }}</h1>
       <p class="login-subtitle">{{ isRegister ? L.registerSubtitle : L.loginSubtitle }}</p>
 
-      <div class="mode-tabs">
+      <div v-if="!isRegister" class="mode-tabs">
         <button type="button" class="mode-tab" :class="{ active: mode === 'password' }" @click="setMode('password')">密码登录</button>
         <button type="button" class="mode-tab" :class="{ active: mode === 'otp' }" @click="setMode('otp')">邮箱验证码</button>
       </div>
@@ -65,6 +65,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { trackReferral } from '../api/referral'
 import { formatRequestError } from '../utils/http'
+import { getSafeLoginRedirectPath, sanitizeInviteCode } from '../utils/authRedirects'
 import { showToast } from 'vant'
 import { LOGIN as L } from '../constants'
 
@@ -98,6 +99,7 @@ watch(
     if (!normalizedInviteCode) return
 
     inviteCode.value = normalizedInviteCode
+    resetOtpState()
     mode.value = 'register'
   }
 )
@@ -106,26 +108,33 @@ onBeforeUnmount(() => {
   if (otpTimer) window.clearInterval(otpTimer)
 })
 
-function normalizeQueryValue(value) {
-  if (Array.isArray(value)) return value[0] || ''
-  return typeof value === 'string' ? value : ''
-}
-
 function normalizeInviteCode(value) {
-  return normalizeQueryValue(value).trim().toLowerCase()
+  return sanitizeInviteCode(value)
 }
 
 function getRedirectPath() {
-  const redirect = normalizeQueryValue(route.query.redirect).trim()
-  return redirect.startsWith('/') ? redirect : '/'
+  return getSafeLoginRedirectPath(route.query)
 }
 
 function setMode(nextMode) {
+  if (nextMode !== 'otp') resetOtpState()
   mode.value = nextMode
 }
 
 function toggleRegister() {
+  resetOtpState()
   mode.value = isRegister.value ? 'password' : 'register'
+}
+
+function resetOtpState() {
+  otpCode.value = ''
+  otpSent.value = false
+  otpSending.value = false
+  otpCooldown.value = 0
+  if (otpTimer) {
+    window.clearInterval(otpTimer)
+    otpTimer = null
+  }
 }
 
 function startOtpCooldown() {
@@ -173,6 +182,7 @@ async function handleSubmit() {
       })
       if (!data.session) {
         showToast({ message: '注册成功，请先查收邮件完成确认', position: 'bottom' })
+        resetOtpState()
         mode.value = 'password'
         return
       }

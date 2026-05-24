@@ -1,12 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { supabase } from '../utils/supabase'
-import { buildPasswordResetRedirect } from '../utils/authRedirects'
+import { sanitizeAuthNextPath, sanitizeInviteCode } from '../utils/authRedirects'
 import {
-  clearPasswordRecoveryPending,
   clearPasswordRecoveryReady,
+  clearPasswordRecoveryReadyForOtherUser,
   clearPasswordRecoveryState,
-  markPasswordRecoveryPending,
 } from '../utils/authRecovery'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -37,7 +36,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (error) throw error
 
       user.value = data.session?.user ?? null
-      clearPasswordRecoveryReady()
+      clearPasswordRecoveryReadyForOtherUser(user.value?.id)
       if (user.value) {
         try {
           await fetchProfile()
@@ -56,10 +55,6 @@ export const useAuthStore = defineStore('auth', () => {
             profile.value = null
             clearPasswordRecoveryState()
             return
-          }
-
-          if (event !== 'PASSWORD_RECOVERY') {
-            clearPasswordRecoveryReady()
           }
 
           try {
@@ -103,15 +98,15 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function register(email, password, nickname, options = {}) {
     clearPasswordRecoveryState()
-    const callbackUrl = new URL('/auth/callback', window.location.origin)
-    if (options.redirect) callbackUrl.searchParams.set('next', options.redirect)
-    if (options.invite) callbackUrl.searchParams.set('invite', options.invite)
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { nickname },
-        emailRedirectTo: callbackUrl.toString(),
+        data: {
+          nickname,
+          auth_next: sanitizeAuthNextPath(options.redirect, '/'),
+          invite_code: sanitizeInviteCode(options.invite),
+        },
       },
     })
     if (error) throw error
@@ -190,8 +185,8 @@ export const useAuthStore = defineStore('auth', () => {
     profile.value = null
   }
 
-  async function exchangeCodeForSession(code) {
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+  async function setSession(sessionTokens) {
+    const { data, error } = await supabase.auth.setSession(sessionTokens)
     if (error) throw error
 
     user.value = data.session?.user ?? null
@@ -210,15 +205,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function requestPasswordReset(email) {
     clearPasswordRecoveryState()
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: buildPasswordResetRedirect(window.location.origin),
-    })
-    if (error) {
-      clearPasswordRecoveryPending()
-      throw error
-    }
-
-    markPasswordRecoveryPending()
+    const { error } = await supabase.auth.resetPasswordForEmail(email)
+    if (error) throw error
   }
 
   async function updateNickname(nickname) {
@@ -301,7 +289,7 @@ export const useAuthStore = defineStore('auth', () => {
     verifyEmailOtp,
     login,
     logout,
-    exchangeCodeForSession,
+    setSession,
     requestPasswordReset,
     fetchProfile,
     updateNickname,
