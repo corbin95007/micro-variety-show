@@ -4,6 +4,9 @@ import { useAuthStore } from '../stores/auth'
 const routes = [
   { path: '/', component: () => import('../views/Home.vue') },
   { path: '/login', component: () => import('../views/Login.vue'), meta: { hideBottomNav: true } },
+  { path: '/forgot-password', component: () => import('../views/ForgotPassword.vue'), meta: { hideBottomNav: true } },
+  { path: '/reset-password', component: () => import('../views/ResetPassword.vue'), meta: { hideBottomNav: true } },
+  { path: '/auth/callback', component: () => import('../views/AuthCallback.vue'), meta: { hideBottomNav: true } },
   { path: '/test', component: () => import('../views/TestHub.vue') },
   { path: '/test/quiz', component: () => import('../views/Quiz.vue'), meta: { hideBottomNav: true } },
   { path: '/test/result/:id', component: () => import('../views/Result.vue') },

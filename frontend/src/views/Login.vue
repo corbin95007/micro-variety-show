@@ -7,11 +7,16 @@
     </header>
 
     <div class="login-body">
-      <h1 class="login-title">{{ isLogin ? L.loginTitle : L.registerTitle }}</h1>
-      <p class="login-subtitle">{{ isLogin ? L.loginSubtitle : L.registerSubtitle }}</p>
+      <h1 class="login-title">{{ isRegister ? L.registerTitle : L.loginTitle }}</h1>
+      <p class="login-subtitle">{{ isRegister ? L.registerSubtitle : L.loginSubtitle }}</p>
+
+      <div class="mode-tabs">
+        <button type="button" class="mode-tab" :class="{ active: mode === 'password' }" @click="setMode('password')">密码登录</button>
+        <button type="button" class="mode-tab" :class="{ active: mode === 'otp' }" @click="setMode('otp')">邮箱验证码</button>
+      </div>
 
       <form class="login-form" @submit.prevent="handleSubmit">
-        <div v-if="!isLogin" class="field">
+        <div v-if="isRegister" class="field">
           <label class="field-label">{{ L.nicknameLabel }}</label>
           <input v-model="nickname" class="field-input" type="text" :placeholder="L.nicknamePlaceholder" required />
         </div>
@@ -19,30 +24,43 @@
           <label class="field-label">{{ L.emailLabel }}</label>
           <input v-model="email" class="field-input" type="email" :placeholder="L.emailPlaceholder" required />
         </div>
-        <div class="field">
+        <div v-if="mode !== 'otp'" class="field">
           <label class="field-label">{{ L.passwordLabel }}</label>
           <input v-model="password" class="field-input" type="password" :placeholder="L.passwordPlaceholder" required />
         </div>
-        <div v-if="!isLogin" class="field">
+        <div v-if="mode === 'otp'" class="field">
+          <label class="field-label">验证码</label>
+          <div class="code-row">
+            <input v-model="otpCode" class="field-input" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位邮箱验证码" />
+            <button type="button" class="code-btn" :disabled="submitting || otpSending || otpCooldown > 0" @click="handleSendOtp">
+              {{ otpCooldown > 0 ? `${otpCooldown}s` : otpSent ? '重发' : '发送' }}
+            </button>
+          </div>
+        </div>
+        <div v-if="isRegister" class="field">
           <label class="field-label">{{ L.inviteLabel }} <span class="optional">{{ L.inviteOptional }}</span></label>
           <input v-model="inviteCode" class="field-input" type="text" :placeholder="L.invitePlaceholder" />
         </div>
 
         <button class="submit-btn" type="submit" :disabled="submitting">
           <span v-if="submitting" class="btn-loading"></span>
-          <span v-else>{{ isLogin ? L.loginBtn : L.registerBtn }}</span>
+          <span v-else>{{ submitText }}</span>
         </button>
       </form>
 
-      <button type="button" class="toggle-btn" @click="isLogin = !isLogin">
-        {{ isLogin ? L.toRegister : L.toLogin }}
+      <button v-if="mode === 'password'" type="button" class="text-btn" @click="router.push('/forgot-password')">
+        忘记密码？
+      </button>
+
+      <button type="button" class="toggle-btn" @click="toggleRegister">
+        {{ isRegister ? L.toLogin : L.toRegister }}
       </button>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { trackReferral } from '../api/referral'
@@ -54,12 +72,24 @@ const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 
-const isLogin = ref(!normalizeInviteCode(route.query.invite))
+const mode = ref(normalizeInviteCode(route.query.invite) ? 'register' : 'password')
 const email = ref('')
 const password = ref('')
 const nickname = ref('')
 const inviteCode = ref(normalizeInviteCode(route.query.invite))
+const otpCode = ref('')
+const otpSent = ref(false)
+const otpSending = ref(false)
+const otpCooldown = ref(0)
 const submitting = ref(false)
+let otpTimer = null
+
+const isRegister = computed(() => mode.value === 'register')
+const submitText = computed(() => {
+  if (mode.value === 'register') return L.registerBtn
+  if (mode.value === 'otp') return otpSent.value ? '验证码登录' : '发送验证码'
+  return L.loginBtn
+})
 
 watch(
   () => route.query.invite,
@@ -68,9 +98,13 @@ watch(
     if (!normalizedInviteCode) return
 
     inviteCode.value = normalizedInviteCode
-    isLogin.value = false
+    mode.value = 'register'
   }
 )
+
+onBeforeUnmount(() => {
+  if (otpTimer) window.clearInterval(otpTimer)
+})
 
 function normalizeQueryValue(value) {
   if (Array.isArray(value)) return value[0] || ''
@@ -86,14 +120,62 @@ function getRedirectPath() {
   return redirect.startsWith('/') ? redirect : '/'
 }
 
+function setMode(nextMode) {
+  mode.value = nextMode
+}
+
+function toggleRegister() {
+  mode.value = isRegister.value ? 'password' : 'register'
+}
+
+function startOtpCooldown() {
+  otpCooldown.value = 60
+  if (otpTimer) window.clearInterval(otpTimer)
+  otpTimer = window.setInterval(() => {
+    otpCooldown.value -= 1
+    if (otpCooldown.value <= 0 && otpTimer) {
+      window.clearInterval(otpTimer)
+      otpTimer = null
+    }
+  }, 1000)
+}
+
+async function handleSendOtp() {
+  if (!email.value.trim()) {
+    showToast({ message: '请先填写邮箱', position: 'bottom' })
+    return
+  }
+
+  otpSending.value = true
+  try {
+    await auth.sendEmailOtp(email.value.trim())
+    otpSent.value = true
+    startOtpCooldown()
+    showToast({ message: '如果邮箱可用，验证码已发送', position: 'bottom' })
+  } catch (error) {
+    console.warn('send otp failed', error)
+    showToast({ message: '如果邮箱可用，验证码已发送', position: 'bottom' })
+  } finally {
+    otpSending.value = false
+  }
+}
+
 async function handleSubmit() {
   submitting.value = true
   try {
-    if (isLogin.value) {
+    if (mode.value === 'password') {
       await auth.login(email.value, password.value)
       router.push(getRedirectPath())
-    } else {
-      await auth.register(email.value, password.value, nickname.value)
+    } else if (mode.value === 'register') {
+      const data = await auth.register(email.value, password.value, nickname.value, {
+        redirect: getRedirectPath(),
+        invite: inviteCode.value,
+      })
+      if (!data.session) {
+        showToast({ message: '注册成功，请先查收邮件完成确认', position: 'bottom' })
+        mode.value = 'password'
+        return
+      }
       if (inviteCode.value) {
         try {
           await trackReferral(inviteCode.value)
@@ -107,10 +189,21 @@ async function handleSubmit() {
         }
       }
       router.push(getRedirectPath())
+    } else {
+      if (!otpSent.value) {
+        await handleSendOtp()
+        return
+      }
+      if (!otpCode.value.trim()) {
+        showToast({ message: '请输入邮箱验证码', position: 'bottom' })
+        return
+      }
+      await auth.verifyEmailOtp(email.value.trim(), otpCode.value.trim())
+      router.push(getRedirectPath())
     }
   } catch (e) {
     showToast({
-      message: formatRequestError(e, isLogin.value ? '登录失败，请稍后再试' : '注册失败，请稍后再试'),
+      message: formatRequestError(e, isRegister.value ? '注册失败，请稍后再试' : '登录失败，请稍后再试'),
       position: 'bottom',
     })
   } finally {
@@ -152,7 +245,36 @@ async function handleSubmit() {
 .login-subtitle {
   font-size: 14px;
   color: var(--color-ink-light);
-  margin-bottom: 36px;
+  margin-bottom: 20px;
+}
+
+.mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 24px;
+  padding: 4px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.mode-tab {
+  border: none;
+  border-radius: calc(var(--radius-md) - 4px);
+  padding: 10px 8px;
+  background: transparent;
+  color: var(--color-ink-light);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.mode-tab.active {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 1px 4px rgba(31, 31, 31, 0.08);
 }
 
 .login-form {
@@ -194,6 +316,28 @@ async function handleSubmit() {
 
 .field-input::placeholder {
   color: var(--color-ink-muted);
+}
+
+.code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 10px;
+}
+
+.code-btn {
+  border: 1.5px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.code-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .submit-btn {
@@ -241,4 +385,17 @@ async function handleSubmit() {
 }
 
 .toggle-btn:active { color: var(--color-accent); }
+
+.text-btn {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px;
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 14px;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
 </style>

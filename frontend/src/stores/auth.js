@@ -1,6 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { supabase } from '../utils/supabase'
+import { buildPasswordResetRedirect } from '../utils/authRedirects'
+import {
+  clearPasswordRecoveryPending,
+  clearPasswordRecoveryReady,
+  clearPasswordRecoveryState,
+  markPasswordRecoveryPending,
+} from '../utils/authRecovery'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
@@ -30,6 +37,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (error) throw error
 
       user.value = data.session?.user ?? null
+      clearPasswordRecoveryReady()
       if (user.value) {
         try {
           await fetchProfile()
@@ -41,12 +49,17 @@ export const useAuthStore = defineStore('auth', () => {
       }
 
       if (!authSubscription) {
-        const { data: listener } = supabase.auth.onAuthStateChange(async (_, session) => {
+        const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
           user.value = session?.user ?? null
 
           if (!user.value) {
             profile.value = null
+            clearPasswordRecoveryState()
             return
+          }
+
+          if (event !== 'PASSWORD_RECOVERY') {
+            clearPasswordRecoveryReady()
           }
 
           try {
@@ -88,11 +101,18 @@ export const useAuthStore = defineStore('auth', () => {
     return profile.value
   }
 
-  async function register(email, password, nickname) {
+  async function register(email, password, nickname, options = {}) {
+    clearPasswordRecoveryState()
+    const callbackUrl = new URL('/auth/callback', window.location.origin)
+    if (options.redirect) callbackUrl.searchParams.set('next', options.redirect)
+    if (options.invite) callbackUrl.searchParams.set('invite', options.invite)
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { nickname } },
+      options: {
+        data: { nickname },
+        emailRedirectTo: callbackUrl.toString(),
+      },
     })
     if (error) throw error
 
@@ -109,7 +129,40 @@ export const useAuthStore = defineStore('auth', () => {
     return data
   }
 
+  async function sendEmailOtp(email) {
+    clearPasswordRecoveryState()
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: false,
+      },
+    })
+    if (error) throw error
+  }
+
+  async function verifyEmailOtp(email, token) {
+    clearPasswordRecoveryState()
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'email',
+    })
+    if (error) throw error
+
+    if (data.session) {
+      user.value = data.session.user
+      try {
+        await fetchProfile()
+      } catch {
+        profile.value = buildProfile()
+      }
+    }
+
+    return data
+  }
+
   async function login(email, password) {
+    clearPasswordRecoveryState()
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -132,8 +185,40 @@ export const useAuthStore = defineStore('auth', () => {
     const { error } = await supabase.auth.signOut()
     if (error) throw error
 
+    clearPasswordRecoveryState()
     user.value = null
     profile.value = null
+  }
+
+  async function exchangeCodeForSession(code) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+    if (error) throw error
+
+    user.value = data.session?.user ?? null
+    if (user.value) {
+      try {
+        await fetchProfile()
+      } catch {
+        profile.value = buildProfile()
+      }
+    } else {
+      profile.value = null
+    }
+
+    return data
+  }
+
+  async function requestPasswordReset(email) {
+    clearPasswordRecoveryState()
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: buildPasswordResetRedirect(window.location.origin),
+    })
+    if (error) {
+      clearPasswordRecoveryPending()
+      throw error
+    }
+
+    markPasswordRecoveryPending()
   }
 
   async function updateNickname(nickname) {
@@ -186,10 +271,24 @@ export const useAuthStore = defineStore('auth', () => {
   async function updatePassword(newPassword) {
     if (!user.value) throw new Error('未登录')
 
-    const { error } = await supabase.auth.updateUser({
+    const { data, error } = await supabase.auth.updateUser({
       password: newPassword,
     })
     if (error) throw error
+
+    if (data?.user) user.value = data.user
+  }
+
+  async function changePassword(currentPassword, newPassword) {
+    if (!user.value?.email) throw new Error('未登录')
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: user.value.email,
+      password: currentPassword,
+    })
+    if (signInError) throw new Error('当前密码不正确')
+
+    await updatePassword(newPassword)
   }
 
   return {
@@ -198,10 +297,15 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     init,
     register,
+    sendEmailOtp,
+    verifyEmailOtp,
     login,
     logout,
+    exchangeCodeForSession,
+    requestPasswordReset,
     fetchProfile,
     updateNickname,
     updatePassword,
+    changePassword,
   }
 })

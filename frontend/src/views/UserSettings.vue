@@ -64,7 +64,9 @@
       @closed="handlePasswordDialogClosed"
     >
       <div class="dialog-body">
+        <input v-model="currentPassword" class="dialog-input" type="password" placeholder="输入当前密码" />
         <input v-model="newPassword" class="dialog-input" type="password" placeholder="输入新密码（至少6位）" />
+        <input v-model="confirmPassword" class="dialog-input" type="password" placeholder="再次输入新密码" />
       </div>
     </van-dialog>
   </div>
@@ -84,7 +86,9 @@ const showPasswordDialog = ref(false)
 const nicknameSaving = ref(false)
 const passwordSaving = ref(false)
 const newNickname = ref('')
+const currentPassword = ref('')
 const newPassword = ref('')
+const confirmPassword = ref('')
 
 function goLogin() {
   router.push({ path: '/login', query: { redirect: '/user/settings' } })
@@ -96,12 +100,16 @@ function openNicknameDialog() {
 }
 
 function openPasswordDialog() {
+  currentPassword.value = ''
   newPassword.value = ''
+  confirmPassword.value = ''
   showPasswordDialog.value = true
 }
 
 function handlePasswordDialogClosed() {
+  currentPassword.value = ''
   newPassword.value = ''
+  confirmPassword.value = ''
 }
 
 async function handleNicknameConfirm() {
@@ -128,15 +136,25 @@ async function handleNicknameConfirm() {
 async function handlePasswordConfirm() {
   if (passwordSaving.value) return
 
+  if (!currentPassword.value) {
+    showToast({ message: '请先输入当前密码', position: 'bottom' })
+    return
+  }
   if (!newPassword.value || newPassword.value.length < 6) {
     showToast({ message: '密码至少需要6位', position: 'bottom' })
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    showToast({ message: '两次密码不一致', position: 'bottom' })
     return
   }
 
   passwordSaving.value = true
   try {
-    await auth.updatePassword(newPassword.value)
+    await auth.changePassword(currentPassword.value, newPassword.value)
+    currentPassword.value = ''
     newPassword.value = ''
+    confirmPassword.value = ''
     showToast({ message: '密码修改成功', position: 'bottom' })
     showPasswordDialog.value = false
   } catch (error) {
@@ -268,6 +286,9 @@ async function handlePasswordConfirm() {
 
 .dialog-body {
   padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .dialog-input {

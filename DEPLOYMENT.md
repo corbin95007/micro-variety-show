@@ -46,11 +46,16 @@ git push -u origin main
 5. 点击 "Run" 执行
 6. 确认右下角显示 "Success. No rows returned"
 
-### 2.3 配置认证（可选，方便测试）
-1. 左侧菜单 → Authentication → Settings
-2. 找到 "Enable email confirmations"
-3. 关闭此选项（这样注册后无需验证邮箱）
-4. 点击 "Save"
+### 2.3 配置认证与邮件回跳
+1. Authentication → Providers → Email：启用 Email provider。
+2. Authentication → URL Configuration：
+   - Site URL：生产站点域名，例如 `https://your-app.vercel.app`
+   - Redirect URLs：加入生产与本地回调，例如：
+     - `https://your-app.vercel.app/auth/callback`
+     - `http://localhost:5173/auth/callback`
+3. Authentication → Email Templates：确认注册确认、Magic Link、Reset Password 模板里的确认链接使用 Supabase 默认确认地址，最终会带 `code` 回跳到 `/auth/callback`。
+4. 当前前端使用 Supabase PKCE：找回密码邮件必须在发起请求的同一浏览器中打开，否则缺少 code verifier 和本地找回密码待确认状态，跨设备或邮件 App 内置浏览器可能验证失败。通过验证后会跳转到 `/reset-password` 设置新密码。
+5. 不要为方便测试关闭邮箱验证；注册确认、OTP 和找回密码都依赖真实邮件链路。
 
 ### 2.4 获取API密钥
 1. 左侧菜单 → Settings → API
