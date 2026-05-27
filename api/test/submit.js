@@ -24,6 +24,19 @@ function buildSubmitLogSummary({ userId, questions, answers, scores, tags, unloc
   }
 }
 
+export function buildSubmitResponse(result, unlockDecision) {
+  const unlocked = Boolean(unlockDecision?.unlocked)
+
+  return {
+    ...result,
+    is_unlocked: Boolean(result?.is_unlocked ?? unlocked),
+    unlock_method: result?.unlock_method ?? unlockDecision?.method ?? null,
+    unlocked,
+    method: unlockDecision?.method ?? null,
+    referral_count: unlockDecision?.referralCount ?? 0,
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
@@ -92,5 +105,5 @@ export default async function handler(req, res) {
     return res.status(500).json(formatSupabaseError('insert_result', error))
   }
   console.log('Inserted test result:', insertSummary)
-  res.json(data)
+  res.json(buildSubmitResponse(data, unlockDecision))
 }

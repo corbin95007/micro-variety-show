@@ -129,17 +129,7 @@ async function handleSubmit() {
     })
     resultId.value = result.id
     testStore.clearDraft(auth.user?.id)
-
-    const unlockResp = await fetch('/api/unlock/check', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ result_id: result.id }),
-    })
-    const unlockData = await parseApiResponse(unlockResp, {
-      fallbackMessage: '解锁状态获取失败',
-      unauthorizedMessage: '登录状态已失效，请重新登录',
-    })
-    unlocked.value = unlockData.unlocked
+    unlocked.value = Boolean(result.unlocked ?? result.is_unlocked)
     showDialog.value = true
   } catch (error) {
     showToast({ message: formatRequestError(error, '提交失败'), position: 'bottom' })

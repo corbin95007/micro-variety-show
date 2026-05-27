@@ -3,7 +3,7 @@ import { parseApiResponse } from '../utils/http'
 
 export async function getReferralInfo() {
   const { data: { session } } = await supabase.auth.getSession()
-  const res = await fetch('/api/referral/info', {
+  const res = await fetch('/api/referral', {
     headers: {
       'Authorization': `Bearer ${session?.access_token}`
     }
@@ -16,7 +16,7 @@ export async function getReferralInfo() {
 
 export async function trackReferral(inviteCode) {
   const { data: { session } } = await supabase.auth.getSession()
-  const res = await fetch('/api/referral/track', {
+  const res = await fetch('/api/referral', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

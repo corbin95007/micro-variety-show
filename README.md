@@ -4,7 +4,9 @@
 
 - 已支持邮箱验证码登录、注册邮箱确认、忘记密码和服务端 TokenHash 邮件回跳重置密码。
 - 邮件链接统一进入 `/api/auth/callback`，服务端验证后通过 `/auth/session#access_token=...` 建立现有 Supabase 浏览器 session；找回密码还必须经服务端签名 grant 和 `/api/auth/recovery/consume` 一次性消费后才允许进入重置页。
+- 忘记密码页已补齐发送后、重新发送、换邮箱和错误状态；重置页已补齐链接失效、重置成功和返回登录状态。
 - 已登录修改密码改为向当前邮箱发送 Supabase 重置密码邮件。
+- 用户设置页已补齐修改密码邮件的发送中、成功和失败行内状态。
 - 测试草稿已支持本地保存和云端自动同步。
 - 用户每次答题会后台上传草稿，进入测试时优先恢复云端草稿，网络失败时回退本地草稿。
 - 提交成功后会清理本地和云端草稿。
@@ -24,5 +26,6 @@
 
 ## 当前验证
 
+- `npm test -- tests/auth-recovery.test.js`：24 passed。
 - `npm test`：5 files / 62 tests passed。
 - `frontend` 的 `npm run build`：passed。
