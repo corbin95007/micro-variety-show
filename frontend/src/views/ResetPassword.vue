@@ -10,7 +10,12 @@
       <h1>重置密码</h1>
       <p>{{ helperText }}</p>
 
-      <form v-if="auth.user && recoveryReady" class="auth-form" @submit.prevent="handleSubmit">
+      <div v-if="updated" class="status-box status-box--success">
+        <div class="status-title">密码已更新</div>
+        <p>请使用新密码重新登录。</p>
+      </div>
+
+      <form v-else-if="auth.user && recoveryReady" class="auth-form" @submit.prevent="handleSubmit">
         <label class="field">
           <span>新密码</span>
           <input v-model="newPassword" type="password" placeholder="至少 6 位" required />
@@ -25,7 +30,12 @@
         </button>
       </form>
 
-      <button v-else type="button" class="primary-btn" @click="router.push('/forgot-password')">重新发送邮件</button>
+      <div v-else class="action-stack">
+        <button type="button" class="primary-btn" @click="router.push('/forgot-password')">重新发送邮件</button>
+        <button type="button" class="text-btn" @click="router.push('/login')">返回登录</button>
+      </div>
+
+      <button v-if="updated" type="button" class="primary-btn" @click="router.replace('/login')">返回登录</button>
     </main>
   </div>
 </template>
@@ -82,7 +92,6 @@ async function handleSubmit() {
     } catch (error) {
       showToast({ message: '密码已更新，请退出当前会话后重新登录', position: 'bottom' })
     }
-    router.replace('/login')
   } catch (error) {
     clearPasswordRecoveryReady()
     recoveryReady.value = false
@@ -112,6 +121,32 @@ p {
   color: var(--color-ink-light);
 }
 .auth-form { display: flex; flex-direction: column; gap: 20px; }
+.status-box {
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  margin-bottom: 20px;
+}
+.status-box--success {
+  border-color: rgba(76, 140, 92, 0.35);
+  background: rgba(76, 140, 92, 0.08);
+}
+.status-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.status-box p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .field span {
   display: block;
   font-size: 12px;
@@ -145,4 +180,16 @@ p {
   cursor: pointer;
 }
 .primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.text-btn {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-ink-light);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
 </style>

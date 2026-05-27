@@ -10,6 +10,10 @@
       <h1 class="login-title">{{ isRegister ? L.registerTitle : L.loginTitle }}</h1>
       <p class="login-subtitle">{{ isRegister ? L.registerSubtitle : L.loginSubtitle }}</p>
 
+      <div v-if="authErrorMessage" class="login-alert">
+        {{ authErrorMessage }}
+      </div>
+
       <div v-if="!isRegister" class="mode-tabs">
         <button type="button" class="mode-tab" :class="{ active: mode === 'password' }" @click="setMode('password')">密码登录</button>
         <button type="button" class="mode-tab" :class="{ active: mode === 'otp' }" @click="setMode('otp')">邮箱验证码</button>
@@ -86,6 +90,7 @@ const submitting = ref(false)
 let otpTimer = null
 
 const isRegister = computed(() => mode.value === 'register')
+const authErrorMessage = computed(() => getAuthErrorMessage(route.query.auth_error))
 const submitText = computed(() => {
   if (mode.value === 'register') return L.registerBtn
   if (mode.value === 'otp') return otpSent.value ? '验证码登录' : '发送验证码'
@@ -110,6 +115,19 @@ onBeforeUnmount(() => {
 
 function normalizeInviteCode(value) {
   return sanitizeInviteCode(value)
+}
+
+function getAuthErrorMessage(value) {
+  const code = Array.isArray(value) ? value[0] : value
+  if (!code) return ''
+
+  const messages = {
+    missing_token_hash: '验证链接缺少必要信息，请重新获取邮件。',
+    verification_failed: '验证链接无效或已过期，请重新获取邮件。',
+    auth_callback_not_configured: '登录验证暂时不可用，请稍后再试。',
+  }
+
+  return messages[code] || '登录验证失败，请重新尝试。'
 }
 
 function getRedirectPath() {
@@ -256,6 +274,17 @@ async function handleSubmit() {
   font-size: 14px;
   color: var(--color-ink-light);
   margin-bottom: 20px;
+}
+
+.login-alert {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(198, 74, 59, 0.28);
+  border-radius: var(--radius-md);
+  background: rgba(198, 74, 59, 0.08);
+  color: var(--color-ink);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .mode-tabs {

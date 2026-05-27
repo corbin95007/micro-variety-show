@@ -36,6 +36,9 @@
             <div>
               <div class="setting-title">登录密码</div>
               <div class="setting-desc">点击后会向当前邮箱发送重置密码邮件。</div>
+              <div v-if="passwordStatusMessage" class="setting-status" :class="`setting-status--${passwordStatusType}`">
+                {{ passwordStatusMessage }}
+              </div>
             </div>
             <button type="button" class="setting-action" :disabled="passwordSaving" @click="handlePasswordReset">
               {{ passwordSaving ? '发送中' : '修改密码' }}
@@ -72,6 +75,8 @@ const auth = useAuthStore()
 const showNicknameDialog = ref(false)
 const nicknameSaving = ref(false)
 const passwordSaving = ref(false)
+const passwordStatusMessage = ref('')
+const passwordStatusType = ref('info')
 const newNickname = ref('')
 
 function goLogin() {
@@ -109,16 +114,24 @@ async function handlePasswordReset() {
 
   const email = auth.user?.email
   if (!email) {
+    passwordStatusType.value = 'error'
+    passwordStatusMessage.value = '当前账号没有可用邮箱。'
     showToast({ message: '当前账号没有可用邮箱', position: 'bottom' })
     return
   }
 
   passwordSaving.value = true
+  passwordStatusType.value = 'info'
+  passwordStatusMessage.value = '正在发送重置密码邮件...'
   try {
     await auth.requestPasswordReset(email)
+    passwordStatusType.value = 'success'
+    passwordStatusMessage.value = `重置密码邮件已发送至 ${email}，请查收邮箱。`
     showToast({ message: '重置密码邮件已发送，请查收邮箱', position: 'bottom' })
   } catch (error) {
-    showToast({ message: error.message || '重置密码邮件发送失败', position: 'bottom' })
+    passwordStatusType.value = 'error'
+    passwordStatusMessage.value = error.message || '重置密码邮件发送失败。'
+    showToast({ message: passwordStatusMessage.value, position: 'bottom' })
   } finally {
     passwordSaving.value = false
   }
@@ -216,6 +229,21 @@ async function handlePasswordReset() {
   font-size: 13px;
   line-height: 1.6;
   color: var(--color-ink-light);
+}
+
+.setting-status {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-ink-light);
+}
+
+.setting-status--success {
+  color: var(--color-primary);
+}
+
+.setting-status--error {
+  color: #b84a3f;
 }
 
 .setting-row {
