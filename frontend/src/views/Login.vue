@@ -31,7 +31,7 @@
         <div v-if="mode === 'otp'" class="field">
           <label class="field-label">验证码</label>
           <div class="code-row">
-            <input v-model="otpCode" class="field-input" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位邮箱验证码" />
+            <input v-model="otpCode" class="field-input" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="8 位邮箱验证码" />
             <button type="button" class="code-btn" :disabled="submitting || otpSending || otpCooldown > 0" @click="handleSendOtp">
               {{ otpCooldown > 0 ? `${otpCooldown}s` : otpSent ? '重发' : '发送' }}
             </button>
@@ -160,10 +160,10 @@ async function handleSendOtp() {
     await auth.sendEmailOtp(email.value.trim())
     otpSent.value = true
     startOtpCooldown()
-    showToast({ message: '如果邮箱可用，验证码已发送', position: 'bottom' })
+    showToast({ message: '如果邮箱可用，8 位验证码已发送', position: 'bottom' })
   } catch (error) {
     console.warn('send otp failed', error)
-    showToast({ message: '如果邮箱可用，验证码已发送', position: 'bottom' })
+    showToast({ message: '如果邮箱可用，8 位验证码已发送', position: 'bottom' })
   } finally {
     otpSending.value = false
   }
@@ -205,7 +205,7 @@ async function handleSubmit() {
         return
       }
       if (!otpCode.value.trim()) {
-        showToast({ message: '请输入邮箱验证码', position: 'bottom' })
+        showToast({ message: '请输入 8 位邮箱验证码', position: 'bottom' })
         return
       }
       await auth.verifyEmailOtp(email.value.trim(), otpCode.value.trim())

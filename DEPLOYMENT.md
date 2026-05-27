@@ -64,7 +64,7 @@ git push -u origin main
      ```html
      <a href="https://your-app.vercel.app/api/auth/callback?token_hash={{ .TokenHash }}&type=magiclink">登录</a>
      ```
-   - 登录邮箱验证码模板必须显示数字验证码：
+   - 登录邮箱验证码模板必须显示 Supabase 8 位数字验证码：
      ```html
      你的登录验证码是：{{ .Token }}
      ```
@@ -183,7 +183,7 @@ vercel --prod
 3. 注册新账号（邮箱+密码+昵称）
 4. 打开注册确认邮件，确认链接域名为 `https://your-app.vercel.app/api/auth/callback?...type=signup`
 5. 回到站点后应已登录；如果带邀请码注册，确认用户中心的邀请码绑定状态
-6. 在登录页切到“邮箱验证码”，收到的邮件应展示 `{{ .Token }}` 生成的 6 位数字验证码，而不是确认链接
+6. 在登录页切到“邮箱验证码”，收到的邮件应展示 `{{ .Token }}` 生成的 Supabase 8 位数字验证码，而不是确认链接
 
 ### 7.2 测试找回密码
 1. 退出登录，进入“忘记密码”

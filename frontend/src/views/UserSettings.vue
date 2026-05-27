@@ -35,9 +35,11 @@
           <div class="setting-row">
             <div>
               <div class="setting-title">登录密码</div>
-              <div class="setting-desc">修改后，下次请使用新密码登录。</div>
+              <div class="setting-desc">点击后会向当前邮箱发送重置密码邮件。</div>
             </div>
-            <button type="button" class="setting-action" @click="openPasswordDialog">修改密码</button>
+            <button type="button" class="setting-action" :disabled="passwordSaving" @click="handlePasswordReset">
+              {{ passwordSaving ? '发送中' : '修改密码' }}
+            </button>
           </div>
         </div>
       </section>
@@ -55,20 +57,6 @@
       </div>
     </van-dialog>
 
-    <van-dialog
-      v-model:show="showPasswordDialog"
-      title="修改密码"
-      show-cancel-button
-      :confirm-button-loading="passwordSaving"
-      @confirm="handlePasswordConfirm"
-      @closed="handlePasswordDialogClosed"
-    >
-      <div class="dialog-body">
-        <input v-model="currentPassword" class="dialog-input" type="password" placeholder="输入当前密码" />
-        <input v-model="newPassword" class="dialog-input" type="password" placeholder="输入新密码（至少6位）" />
-        <input v-model="confirmPassword" class="dialog-input" type="password" placeholder="再次输入新密码" />
-      </div>
-    </van-dialog>
   </div>
 </template>
 
@@ -82,13 +70,9 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const showNicknameDialog = ref(false)
-const showPasswordDialog = ref(false)
 const nicknameSaving = ref(false)
 const passwordSaving = ref(false)
 const newNickname = ref('')
-const currentPassword = ref('')
-const newPassword = ref('')
-const confirmPassword = ref('')
 
 function goLogin() {
   router.push({ path: '/login', query: { redirect: '/user/settings' } })
@@ -97,19 +81,6 @@ function goLogin() {
 function openNicknameDialog() {
   newNickname.value = auth.profile?.nickname || ''
   showNicknameDialog.value = true
-}
-
-function openPasswordDialog() {
-  currentPassword.value = ''
-  newPassword.value = ''
-  confirmPassword.value = ''
-  showPasswordDialog.value = true
-}
-
-function handlePasswordDialogClosed() {
-  currentPassword.value = ''
-  newPassword.value = ''
-  confirmPassword.value = ''
 }
 
 async function handleNicknameConfirm() {
@@ -133,32 +104,21 @@ async function handleNicknameConfirm() {
   }
 }
 
-async function handlePasswordConfirm() {
+async function handlePasswordReset() {
   if (passwordSaving.value) return
 
-  if (!currentPassword.value) {
-    showToast({ message: '请先输入当前密码', position: 'bottom' })
-    return
-  }
-  if (!newPassword.value || newPassword.value.length < 6) {
-    showToast({ message: '密码至少需要6位', position: 'bottom' })
-    return
-  }
-  if (newPassword.value !== confirmPassword.value) {
-    showToast({ message: '两次密码不一致', position: 'bottom' })
+  const email = auth.user?.email
+  if (!email) {
+    showToast({ message: '当前账号没有可用邮箱', position: 'bottom' })
     return
   }
 
   passwordSaving.value = true
   try {
-    await auth.changePassword(currentPassword.value, newPassword.value)
-    currentPassword.value = ''
-    newPassword.value = ''
-    confirmPassword.value = ''
-    showToast({ message: '密码修改成功', position: 'bottom' })
-    showPasswordDialog.value = false
+    await auth.requestPasswordReset(email)
+    showToast({ message: '重置密码邮件已发送，请查收邮箱', position: 'bottom' })
   } catch (error) {
-    showToast({ message: error.message || '密码修改失败', position: 'bottom' })
+    showToast({ message: error.message || '重置密码邮件发送失败', position: 'bottom' })
   } finally {
     passwordSaving.value = false
   }
