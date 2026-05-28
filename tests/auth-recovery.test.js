@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://example.supabase.co'
 process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key'
@@ -14,6 +14,7 @@ const {
   clearPasswordRecoveryState,
   completePasswordRecoverySession,
   hasPasswordRecoveryReady,
+  isRetryableAuthSessionError,
   isPasswordRecoveryStateValid,
   markConsumedPasswordRecoveryReady,
   markPasswordRecoveryReady,
@@ -42,6 +43,10 @@ const {
 } = await import('../api/auth/callback.js')
 
 const { handleRecoveryConsume } = await import('../api/auth/recovery/consume.js')
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 function createStorage() {
   const values = new Map()
@@ -137,6 +142,15 @@ describe('password recovery handoff marker', () => {
     markPasswordRecoveryReady('user-a', { storage, now: 1000 })
     clearPasswordRecoveryState({ storage })
     expect(storage.getItem(RECOVERY_READY_KEY)).toBeNull()
+  })
+})
+
+describe('auth session handoff retry classifier', () => {
+  it('retries only transient lock and browser storage failures', () => {
+    expect(isRetryableAuthSessionError(new Error('NavigatorLockAcquireTimeoutError: lock request timed out'))).toBe(true)
+    expect(isRetryableAuthSessionError(new Error('Failed to access localStorage while setting auth session'))).toBe(true)
+    expect(isRetryableAuthSessionError(new Error('Invalid Refresh Token: Already Used'))).toBe(false)
+    expect(isRetryableAuthSessionError(new Error('refresh token expired'))).toBe(false)
   })
 })
 
@@ -409,8 +423,105 @@ describe('server auth callback', () => {
     expect(url.searchParams.get('invite')).toBe('invite-1')
   })
 
-  it('redirects verification failures without leaking raw errors', async () => {
+  it('logs safe verification failure diagnostics and redirects without leaking tokens', async () => {
     const res = createRes()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const tokenHash = 'secret-token-hash-1'
+
+    await handleAuthCallback({
+      method: 'GET',
+      query: {
+        token_hash: tokenHash,
+        type: 'recovery',
+      },
+    }, res, {
+      env: {
+        APP_BASE_URL: 'https://app.example.com',
+        SUPABASE_URL: 'https://project-ref.supabase.co',
+      },
+      authClient: {
+        auth: {
+          verifyOtp: vi.fn(async () => {
+            const error = new Error(`bad token_hash=${tokenHash}&access_token=access-1&refresh_token=refresh-1&recovery_grant=grant-1`)
+            error.status = 403
+            error.code = 'otp_expired'
+            return {
+              data: null,
+              error,
+            }
+          }),
+        },
+      },
+    })
+
+    expect(res.redirectUrl).toBe('https://app.example.com/login?auth_error=verification_failed')
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toBe('Auth callback verification failed:')
+    expect(warn.mock.calls[0][1]).toMatchObject({
+      type: 'recovery',
+      hasTokenHash: true,
+      supabaseUrlHost: 'project-ref.supabase.co',
+      reason: 'verifyOtp_error',
+      errorName: 'Error',
+      errorStatus: '403',
+      errorCode: 'otp_expired',
+    })
+    expect(warn.mock.calls[0][1].errorMessage).toContain('token_hash=[REDACTED]')
+    expect(warn.mock.calls[0][1].errorMessage).toContain('access_token=[REDACTED]')
+
+    const logged = JSON.stringify(warn.mock.calls)
+    expect(logged).not.toContain(tokenHash)
+    expect(logged).not.toContain('access-1')
+    expect(logged).not.toContain('refresh-1')
+    expect(logged).not.toContain('grant-1')
+    expect(logged).not.toContain('token_hash=secret-token-hash-1')
+    expect(logged).not.toContain('access_token=access-1')
+    expect(logged).not.toContain('refresh_token=refresh-1')
+    expect(logged).not.toContain('recovery_grant=grant-1')
+  })
+
+  it('logs missing-session verification results safely and still uses verification_failed', async () => {
+    const res = createRes()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await handleAuthCallback({
+      method: 'GET',
+      query: {
+        token_hash: 'hash-1',
+        type: 'recovery',
+      },
+    }, res, {
+      env: {
+        APP_BASE_URL: 'https://app.example.com',
+        SUPABASE_URL: 'not a url',
+      },
+      authClient: {
+        auth: {
+          verifyOtp: vi.fn(async () => ({
+            data: { session: null },
+            error: null,
+          })),
+        },
+      },
+    })
+
+    expect(res.redirectUrl).toBe('https://app.example.com/login?auth_error=verification_failed')
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][1]).toMatchObject({
+      type: 'recovery',
+      hasTokenHash: true,
+      supabaseUrlHost: 'invalid_supabase_url',
+      reason: 'missing_session',
+      errorName: null,
+      errorMessage: null,
+      errorStatus: null,
+      errorCode: null,
+    })
+  })
+
+  it('redirects verification failures without leaking raw errors to users', async () => {
+    const res = createRes()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     await handleAuthCallback({
       method: 'GET',
@@ -431,6 +542,7 @@ describe('server auth callback', () => {
     })
 
     expect(res.redirectUrl).toBe('https://app.example.com/login?auth_error=verification_failed')
+    expect(res.redirectUrl).not.toContain('raw provider error')
   })
 })
 

@@ -60,6 +60,7 @@ git push -u origin main
      ```html
      <a href="https://your-app.vercel.app/api/auth/callback?token_hash={{ .TokenHash }}&type=recovery">重置密码</a>
      ```
+     必须使用 `{{ .TokenHash }}` 加服务端 `/api/auth/callback`。不要使用默认 `{{ .ConfirmationURL }}`、不要链接到前端 `/auth/callback`，否则服务端拿不到可验证的 `token_hash`，用户会回到登录页并看到 `verification_failed`。
    - Magic Link：当前登录 UI 不提供 Magic Link 登录；如以后启用，才使用：
      ```html
      <a href="https://your-app.vercel.app/api/auth/callback?token_hash={{ .TokenHash }}&type=magiclink">登录</a>
@@ -212,6 +213,9 @@ A: 检查 `service_role` 密钥是否正确，确认SQL迁移已执行
 
 ### Q: Vercel部署后API 500错误
 A: 检查Vercel环境变量是否正确配置
+
+### Q: 重置密码邮件点击后回到登录页并提示验证失败
+A: 对用户统一显示 `verification_failed`，敏感细节不会放进 URL。到 Vercel Function Logs 搜索 `Auth callback verification failed:`，检查 `type`、`hasTokenHash`、`supabaseUrlHost`、`reason`、`errorName`、`errorMessage`、`errorStatus`、`errorCode`。日志不会打印 `token_hash`、`access_token`、`refresh_token`、`recovery_grant` 或完整 query。优先确认 Reset password 模板是 `https://your-app.vercel.app/api/auth/callback?token_hash={{ .TokenHash }}&type=recovery`，且 `SUPABASE_URL` 指向同一个 Supabase 项目。
 
 ---
 

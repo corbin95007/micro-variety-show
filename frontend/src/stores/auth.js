@@ -15,6 +15,29 @@ export const useAuthStore = defineStore('auth', () => {
   let initPromise = null
   let authSubscription = null
 
+  function subscribeAuthChanges() {
+    if (authSubscription) return
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      user.value = session?.user ?? null
+
+      if (!user.value) {
+        profile.value = null
+        clearPasswordRecoveryState()
+        return
+      }
+
+      clearPasswordRecoveryReadyForOtherUser(user.value.id)
+      try {
+        await fetchProfile()
+      } catch {
+        profile.value = buildProfile()
+      }
+    })
+
+    authSubscription = listener.subscription
+  }
+
   function buildProfile(data = {}) {
     if (!user.value) return null
 
@@ -47,25 +70,7 @@ export const useAuthStore = defineStore('auth', () => {
         profile.value = null
       }
 
-      if (!authSubscription) {
-        const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-          user.value = session?.user ?? null
-
-          if (!user.value) {
-            profile.value = null
-            clearPasswordRecoveryState()
-            return
-          }
-
-          try {
-            await fetchProfile()
-          } catch {
-            profile.value = buildProfile()
-          }
-        })
-
-        authSubscription = listener.subscription
-      }
+      subscribeAuthChanges()
     })().catch((error) => {
       console.error('auth init failed', error)
       user.value = null
@@ -186,21 +191,34 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function setSession(sessionTokens) {
-    const { data, error } = await supabase.auth.setSession(sessionTokens)
-    if (error) throw error
+    loading.value = true
+    try {
+      const { data, error } = await supabase.auth.setSession(sessionTokens)
+      if (error) throw error
 
-    user.value = data.session?.user ?? null
-    if (user.value) {
-      try {
-        await fetchProfile()
-      } catch {
-        profile.value = buildProfile()
+      user.value = data.session?.user ?? null
+      clearPasswordRecoveryReadyForOtherUser(user.value?.id)
+      if (user.value) {
+        try {
+          await fetchProfile()
+        } catch {
+          profile.value = buildProfile()
+        }
+      } else {
+        profile.value = null
       }
-    } else {
-      profile.value = null
-    }
 
-    return data
+      subscribeAuthChanges()
+      loading.value = false
+      return data
+    } catch (error) {
+      loading.value = false
+      throw error
+    }
+  }
+
+  function finishSessionHandoff() {
+    loading.value = false
   }
 
   async function requestPasswordReset(email) {
@@ -290,6 +308,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     logout,
     setSession,
+    finishSessionHandoff,
     requestPasswordReset,
     fetchProfile,
     updateNickname,

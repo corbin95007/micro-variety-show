@@ -30,6 +30,11 @@
         </button>
       </form>
 
+      <div v-else-if="auth.loading" class="status-box">
+        <div class="status-title">正在确认验证状态</div>
+        <p>请稍候，正在建立重置密码会话。</p>
+      </div>
+
       <div v-else class="action-stack">
         <button type="button" class="primary-btn" @click="router.push('/forgot-password')">重新发送邮件</button>
         <button type="button" class="text-btn" @click="router.push('/login')">返回登录</button>
@@ -41,7 +46,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { useAuthStore } from '../stores/auth'
@@ -58,13 +63,18 @@ const recoveryReady = ref(false)
 
 const helperText = computed(() => {
   if (updated.value) return '密码已更新，请使用新密码登录。'
+  if (auth.loading) return '请稍候，正在确认验证状态。'
   if (!auth.user || !recoveryReady.value) return '链接无效或已过期，请重新发送重置邮件。'
   return '验证已完成，请设置新密码。'
 })
 
-onMounted(() => {
-  recoveryReady.value = hasPasswordRecoveryReady(auth.user?.id)
-})
+watch(
+  () => [auth.user?.id, auth.loading],
+  ([userId]) => {
+    recoveryReady.value = hasPasswordRecoveryReady(userId)
+  },
+  { immediate: true }
+)
 
 async function handleSubmit() {
   if (submitting.value) return

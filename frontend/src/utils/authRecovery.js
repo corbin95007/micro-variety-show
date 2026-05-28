@@ -2,6 +2,25 @@ export const RECOVERY_READY_KEY = 'micro-variety-show:auth:recovery-ready'
 export const RECOVERY_READY_TTL_MS = 15 * 60 * 1000
 export const PASSWORD_RECOVERY_FLOW = 'recovery'
 
+const NON_RETRYABLE_SESSION_ERROR_PATTERNS = [
+  /invalid[\s_-]*(grant|refresh|token|jwt|session)/i,
+  /expired/i,
+  /not[\s_-]*found/i,
+  /unauthori[sz]ed/i,
+  /forbidden/i,
+  /already[\s_-]*(used|consumed)/i,
+]
+
+const TRANSIENT_SESSION_ERROR_PATTERNS = [
+  /lock/i,
+  /navigator\.locks/i,
+  /lockmanager/i,
+  /concurr/i,
+  /storage/i,
+  /indexeddb/i,
+  /localstorage/i,
+]
+
 function getSessionStorage() {
   return typeof window !== 'undefined' ? window.sessionStorage : null
 }
@@ -87,4 +106,18 @@ export function markConsumedPasswordRecoveryReady(result, options = {}) {
 
   markPasswordRecoveryReady(result.userId, options)
   return true
+}
+
+export function isRetryableAuthSessionError(error) {
+  const text = [
+    error?.name,
+    error?.message,
+    error?.status,
+    error?.code,
+    typeof error === 'string' ? error : '',
+  ].filter(Boolean).join(' ')
+
+  if (!text) return false
+  if (NON_RETRYABLE_SESSION_ERROR_PATTERNS.some((pattern) => pattern.test(text))) return false
+  return TRANSIENT_SESSION_ERROR_PATTERNS.some((pattern) => pattern.test(text))
 }

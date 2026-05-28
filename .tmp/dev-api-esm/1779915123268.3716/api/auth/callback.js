@@ -8,12 +8,6 @@ import {
 import { buildRecoveryHandoffGrant, getAuthHandoffSecret } from '../../shared/authHandoff.js'
 
 const ALLOWED_TYPES = new Set(['signup', 'recovery', 'magiclink'])
-const SENSITIVE_LOG_KEYS = [
-  'token_hash',
-  'access_token',
-  'refresh_token',
-  'recovery_grant',
-]
 
 function getPublicAppOrigin(env = process.env) {
   const raw = env.APP_BASE_URL || env.PUBLIC_APP_BASE_URL || ''
@@ -30,61 +24,6 @@ function getPublicAppOrigin(env = process.env) {
     return url.toString().replace(/\/$/, '')
   } catch {
     return null
-  }
-}
-
-function getSupabaseUrlHost(env = process.env) {
-  const raw = env.SUPABASE_URL || env.VITE_SUPABASE_URL || ''
-  if (!raw) return ''
-
-  try {
-    return new URL(raw).host
-  } catch {
-    return 'invalid_supabase_url'
-  }
-}
-
-function redactLogValue(value, sensitiveValues = []) {
-  if (value == null) return null
-
-  let output = String(value)
-  output = output.replace(/https?:\/\/[^\s"'<>]+/gi, (match) => {
-    try {
-      const url = new URL(match)
-      if (url.search) url.search = '?[REDACTED]'
-      if (url.hash) url.hash = '#[REDACTED]'
-      return url.toString()
-    } catch {
-      return match
-    }
-  })
-  for (const sensitiveValue of sensitiveValues) {
-    if (sensitiveValue) output = output.split(sensitiveValue).join('[REDACTED]')
-  }
-  for (const key of SENSITIVE_LOG_KEYS) {
-    output = output.replace(new RegExp(`${key}=([^\\s&#]+)`, 'gi'), `${key}=[REDACTED]`)
-    output = output.replace(new RegExp(`"${key}"\\s*:\\s*"[^"]*"`, 'gi'), `"${key}":"[REDACTED]"`)
-  }
-  return output
-}
-
-function getErrorField(error, key, sensitiveValues = []) {
-  const value = error?.[key]
-  if (value == null) return null
-  return redactLogValue(value, sensitiveValues)
-}
-
-function buildVerificationFailureLog({ parsed, env, error, reason }) {
-  const sensitiveValues = [parsed.tokenHash]
-  return {
-    type: parsed.type,
-    hasTokenHash: Boolean(parsed.tokenHash),
-    supabaseUrlHost: getSupabaseUrlHost(env),
-    reason,
-    errorName: getErrorField(error, 'name', sensitiveValues),
-    errorMessage: getErrorField(error, 'message', sensitiveValues),
-    errorStatus: getErrorField(error, 'status', sensitiveValues),
-    errorCode: getErrorField(error, 'code', sensitiveValues),
   }
 }
 
@@ -148,7 +87,6 @@ export async function handleAuthCallback(req, res, options = {}) {
   }
 
   try {
-    const env = options.env || process.env
     const authClient = options.authClient || createSupabaseAuthClient()
     const { data, error } = await authClient.auth.verifyOtp({
       token_hash: parsed.tokenHash,
@@ -156,12 +94,10 @@ export async function handleAuthCallback(req, res, options = {}) {
     })
 
     if (error || !data?.session?.access_token || !data?.session?.refresh_token) {
-      console.warn('Auth callback verification failed:', buildVerificationFailureLog({
-        parsed,
-        env,
-        error,
-        reason: error ? 'verifyOtp_error' : 'missing_session',
-      }))
+      console.warn('Auth callback verification failed:', {
+        type: parsed.type,
+        message: error?.message ?? 'Missing session',
+      })
       return res.redirect(302, buildFailureRedirect(origin, 'verification_failed'))
     }
 

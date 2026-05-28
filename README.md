@@ -20,6 +20,7 @@
 - `APP_BASE_URL` 必须配置为固定生产前端域名，生产只允许 `https://`；本地开发仅允许 `http://localhost` 或 `http://127.0.0.1`。
 - `AUTH_HANDOFF_SECRET` 为必填长随机密钥，用于签名找回密码 handoff，前端不能持有。
 - Site URL 保持生产站点域名；Redirect URLs 可保留生产域和本地开发域用于兼容 Supabase Dashboard 校验，但实际邮件模板固定走 `/api/auth/callback`。
+- 如果登录页出现 `verification_failed`，不要把完整邮件链接或 token 贴进日志。检查服务端日志 `Auth callback verification failed:`，它只记录 `type`、是否带 `token_hash`、Supabase host、错误 name/message/status/code 的脱敏摘要。
 - Supabase 详细配置见 `DEPLOYMENT.md`。
 - 需要按尚未执行的顺序应用 `supabase/migrations/`：至少包含 `007_test_drafts.sql` 和 `008_auth_handoff_consumptions.sql`。
 - 本次相关接口为 `/api/test/draft`，支持 `GET`、`PUT`、`DELETE`。

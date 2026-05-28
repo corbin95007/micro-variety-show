@@ -16,7 +16,11 @@ import { trackReferral } from '../api/referral'
 import { formatRequestError, parseApiResponse } from '../utils/http'
 import { useAuthStore } from '../stores/auth'
 import { getSafeAuthNextPath, normalizeQueryValue, sanitizeInviteCode } from '../utils/authRedirects'
-import { clearPasswordRecoveryState, markConsumedPasswordRecoveryReady } from '../utils/authRecovery'
+import {
+  clearPasswordRecoveryState,
+  isRetryableAuthSessionError,
+  markConsumedPasswordRecoveryReady,
+} from '../utils/authRecovery'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +29,8 @@ const auth = useAuthStore()
 const title = ref('正在登录')
 const message = ref('请稍候，正在建立安全会话。')
 const failed = ref(false)
+
+const SESSION_RETRY_DELAYS = [120, 320, 700]
 
 function readHashSession() {
   const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
@@ -40,23 +46,48 @@ function clearAddress() {
   window.history.replaceState({}, document.title, cleanUrl)
 }
 
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function setSessionWithConservativeRetry(sessionTokens) {
+  let lastError = null
+
+  for (let attempt = 0; attempt <= SESSION_RETRY_DELAYS.length; attempt += 1) {
+    try {
+      return await auth.setSession(sessionTokens)
+    } catch (error) {
+      lastError = error
+      if (!isRetryableAuthSessionError(error) || attempt >= SESSION_RETRY_DELAYS.length) {
+        throw error
+      }
+      message.value = '正在等待浏览器完成会话写入，请稍候。'
+      await wait(SESSION_RETRY_DELAYS[attempt])
+    }
+  }
+
+  throw lastError
+}
+
 onMounted(async () => {
   const sessionTokens = readHashSession()
-  clearAddress()
 
   if (!sessionTokens.access_token || !sessionTokens.refresh_token) {
+    clearAddress()
     clearPasswordRecoveryState()
+    auth.finishSessionHandoff()
     title.value = '链接无效'
-    message.value = '验证链接缺少会话信息，请重新发起请求。'
+    message.value = '验证链接缺少会话信息，请重新发送邮件。链接也可能已经过期。'
     failed.value = true
     return
   }
 
   try {
-    const data = await auth.setSession({
+    const data = await setSessionWithConservativeRetry({
       access_token: sessionTokens.access_token,
       refresh_token: sessionTokens.refresh_token,
     })
+    clearAddress()
     const flow = normalizeQueryValue(route.query.flow).trim()
     const nextPath = getSafeAuthNextPath(route.query)
 
@@ -100,9 +131,11 @@ onMounted(async () => {
 
     router.replace(nextPath)
   } catch (error) {
+    clearAddress()
     clearPasswordRecoveryState()
+    auth.finishSessionHandoff()
     title.value = '验证失败'
-    message.value = error.message || '链接可能已过期，请重新获取邮件。'
+    message.value = '验证链接无效或已过期，请重新发送邮件后再试。'
     failed.value = true
   }
 })
