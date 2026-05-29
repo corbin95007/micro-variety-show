@@ -15,10 +15,14 @@ function isAuthSessionHandoff() {
 }
 
 async function bootstrapAuth() {
-  if (isAuthSessionHandoff()) return
+  const auth = useAuthStore()
+
+  if (isAuthSessionHandoff()) {
+    auth.finishSessionHandoff()
+    return
+  }
 
   // 初始化 auth store（恢复登录状态）
-  const auth = useAuthStore()
   await auth.init()
 }
 
