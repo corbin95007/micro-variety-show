@@ -5,6 +5,13 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'test-anon-key'
 
 const {
+  claimAuthSessionHandoff,
+  isAuthSessionPath,
+  resetAuthSessionHandoffClaimForTests,
+  shouldRenderRouteDuringAuthLoading,
+} = await import('../frontend/src/utils/authSessionHandoff.js')
+
+const {
   RECOVERY_READY_KEY,
   RECOVERY_READY_TTL_MS,
   PASSWORD_RECOVERY_FLOW,
@@ -52,6 +59,7 @@ const {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  resetAuthSessionHandoffClaimForTests()
 })
 
 function createStorage() {
@@ -157,6 +165,74 @@ describe('auth session handoff retry classifier', () => {
     expect(isRetryableAuthSessionError(new Error('Failed to access localStorage while setting auth session'))).toBe(true)
     expect(isRetryableAuthSessionError(new Error('Invalid Refresh Token: Already Used'))).toBe(false)
     expect(isRetryableAuthSessionError(new Error('refresh token expired'))).toBe(false)
+  })
+})
+
+describe('auth session handoff client guards', () => {
+  it('treats trailing slash auth session URLs as handoff routes', () => {
+    expect(isAuthSessionPath('/auth/session')).toBe(true)
+    expect(isAuthSessionPath('/auth/session/')).toBe(true)
+    expect(isAuthSessionPath('/auth/session///')).toBe(true)
+    expect(isAuthSessionPath('/auth/session-extra')).toBe(false)
+  })
+
+  it('keeps auth session rendered while global auth loading is true', () => {
+    expect(shouldRenderRouteDuringAuthLoading({ path: '/auth/session/', loading: true })).toBe(true)
+    expect(shouldRenderRouteDuringAuthLoading({ path: '/reset-password', loading: true })).toBe(false)
+    expect(shouldRenderRouteDuringAuthLoading({ path: '/reset-password', loading: false })).toBe(true)
+  })
+
+  it('claims the session handoff only once per page lifetime', () => {
+    expect(claimAuthSessionHandoff()).toBe(true)
+    expect(claimAuthSessionHandoff()).toBe(false)
+  })
+
+  it('can set the auth session without blocking on profile fetch', async () => {
+    vi.resetModules()
+
+    const profileSelect = vi.fn(() => ({
+      eq: vi.fn(() => ({
+        maybeSingle: vi.fn(async () => ({ data: { nickname: 'profile' }, error: null })),
+      })),
+    }))
+    const supabase = {
+      auth: {
+        setSession: vi.fn(async () => ({
+          data: {
+            session: {
+              access_token: 'access-1',
+              user: { id: 'user-a', user_metadata: { nickname: 'metadata-name' } },
+            },
+          },
+          error: null,
+        })),
+        onAuthStateChange: vi.fn(() => ({
+          data: { subscription: { unsubscribe: vi.fn() } },
+        })),
+      },
+      from: vi.fn(() => ({ select: profileSelect })),
+    }
+
+    vi.doMock('../frontend/src/utils/supabase.js', () => ({ supabase }))
+    const { createPinia, setActivePinia } = await import('../frontend/node_modules/pinia/dist/pinia.mjs')
+    const { useAuthStore } = await import('../frontend/src/stores/auth.js')
+    setActivePinia(createPinia())
+
+    const auth = useAuthStore()
+    const data = await auth.setSession({
+      access_token: 'access-1',
+      refresh_token: 'refresh-1',
+    }, { fetchProfile: false })
+
+    expect(data.session.user.id).toBe('user-a')
+    expect(auth.user.id).toBe('user-a')
+    expect(auth.loading).toBe(false)
+    expect(auth.profile).toMatchObject({ id: 'user-a', nickname: 'metadata-name' })
+    expect(supabase.auth.setSession).toHaveBeenCalledWith({
+      access_token: 'access-1',
+      refresh_token: 'refresh-1',
+    })
+    expect(supabase.from).not.toHaveBeenCalled()
   })
 })
 

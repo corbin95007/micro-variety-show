@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import router from './router'
 import App from './App.vue'
 import { useAuthStore } from './stores/auth'
+import { isAuthSessionPath } from './utils/authSessionHandoff'
 import 'vant/lib/index.css'
 
 const app = createApp(App)
@@ -11,7 +12,7 @@ app.use(pinia)
 app.use(router)
 
 function isAuthSessionHandoff() {
-  return window.location.pathname === '/auth/session'
+  return isAuthSessionPath(window.location.pathname)
 }
 
 async function bootstrapAuth() {

@@ -208,7 +208,8 @@ export const useAuthStore = defineStore('auth', () => {
     profile.value = null
   }
 
-  async function setSession(sessionTokens) {
+  async function setSession(sessionTokens, options = {}) {
+    const shouldFetchProfile = options.fetchProfile !== false
     loading.value = true
     try {
       const { data, error } = await supabase.auth.setSession(sessionTokens)
@@ -216,12 +217,14 @@ export const useAuthStore = defineStore('auth', () => {
 
       user.value = data.session?.user ?? null
       clearPasswordRecoveryReadyForOtherUser(user.value?.id)
-      if (user.value) {
+      if (user.value && shouldFetchProfile) {
         try {
           await fetchProfile()
         } catch {
           profile.value = buildProfile()
         }
+      } else if (user.value) {
+        profile.value = buildProfile()
       } else {
         profile.value = null
       }

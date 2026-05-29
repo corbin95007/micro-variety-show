@@ -1,11 +1,11 @@
 <template>
   <div class="app-shell">
-    <router-view v-if="!auth.loading" v-slot="{ Component }">
+    <router-view v-if="shouldRenderRoute" v-slot="{ Component }">
       <transition name="page-fade" mode="out-in">
         <component :is="Component" />
       </transition>
     </router-view>
-    <div v-else class="global-loading">
+    <div v-if="auth.loading && !isAuthSessionRoute" class="global-loading">
       <div class="loading-pulse"></div>
       <span>加载中</span>
     </div>
@@ -18,9 +18,15 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import BottomNav from './components/BottomNav.vue'
+import { isAuthSessionPath, shouldRenderRouteDuringAuthLoading } from './utils/authSessionHandoff'
 
 const auth = useAuthStore()
 const route = useRoute()
+const isAuthSessionRoute = computed(() => isAuthSessionPath(route.path))
+const shouldRenderRoute = computed(() => shouldRenderRouteDuringAuthLoading({
+  path: route.path,
+  loading: auth.loading,
+}))
 const showBottomNav = computed(() => !auth.loading && !route.meta.hideBottomNav)
 </script>
 

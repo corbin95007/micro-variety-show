@@ -16,6 +16,7 @@ import { trackReferral } from '../api/referral'
 import { formatRequestError, parseApiResponse } from '../utils/http'
 import { useAuthStore } from '../stores/auth'
 import { getSafeAuthNextPath, normalizeQueryValue, sanitizeInviteCode } from '../utils/authRedirects'
+import { claimAuthSessionHandoff } from '../utils/authSessionHandoff'
 import {
   clearPasswordRecoveryState,
   isRetryableAuthSessionError,
@@ -55,7 +56,7 @@ async function setSessionWithConservativeRetry(sessionTokens) {
 
   for (let attempt = 0; attempt <= SESSION_RETRY_DELAYS.length; attempt += 1) {
     try {
-      return await auth.setSession(sessionTokens)
+      return await auth.setSession(sessionTokens, { fetchProfile: false })
     } catch (error) {
       lastError = error
       if (!isRetryableAuthSessionError(error) || attempt >= SESSION_RETRY_DELAYS.length) {
@@ -70,6 +71,11 @@ async function setSessionWithConservativeRetry(sessionTokens) {
 }
 
 onMounted(async () => {
+  if (!claimAuthSessionHandoff()) {
+    message.value = '安全会话正在处理中，请稍候。'
+    return
+  }
+
   const sessionTokens = readHashSession()
 
   if (!sessionTokens.access_token || !sessionTokens.refresh_token) {
@@ -111,13 +117,16 @@ onMounted(async () => {
         return
       }
       router.replace('/reset-password')
+      auth.fetchProfile().catch(() => {})
       return
     }
 
     clearPasswordRecoveryState()
+    const profilePromise = auth.fetchProfile().catch(() => {})
     const inviteCode = sanitizeInviteCode(route.query.invite)
     if (flow === 'signup' && inviteCode) {
       try {
+        await profilePromise
         await trackReferral(inviteCode)
       } catch (error) {
         showToast({
@@ -129,6 +138,7 @@ onMounted(async () => {
       }
     }
 
+    await profilePromise
     router.replace(nextPath)
   } catch (error) {
     clearAddress()
