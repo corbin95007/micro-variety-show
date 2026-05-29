@@ -60,7 +60,8 @@ async function handleSubmit() {
   submitting.value = true
   errorMessage.value = ''
   try {
-    const targetEmail = email.value.trim()
+    const targetEmail = email.value.trim().toLowerCase()
+    email.value = targetEmail
     await auth.requestPasswordReset(targetEmail)
     sentEmail.value = targetEmail
     sent.value = true

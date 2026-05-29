@@ -1,5 +1,4 @@
 import { createSupabaseAuthClient } from '../_lib/supabase.js'
-import { getPublicAppOrigin } from '../_lib/auth-url.js'
 import {
   buildSafeAuthQuery,
   normalizeQueryValue,
@@ -15,6 +14,24 @@ const SENSITIVE_LOG_KEYS = [
   'refresh_token',
   'recovery_grant',
 ]
+
+function getPublicAppOrigin(env = process.env) {
+  const raw = env.APP_BASE_URL || env.PUBLIC_APP_BASE_URL || ''
+  if (!raw) return null
+
+  try {
+    const url = new URL(raw)
+    const isLocalDevHost = ['localhost', '127.0.0.1'].includes(url.hostname)
+    if (url.protocol === 'http:' && !(env.NODE_ENV !== 'production' && isLocalDevHost)) return null
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+    url.pathname = ''
+    url.search = ''
+    url.hash = ''
+    return url.toString().replace(/\/$/, '')
+  } catch {
+    return null
+  }
+}
 
 function getSupabaseUrlHost(env = process.env) {
   const raw = env.SUPABASE_URL || env.VITE_SUPABASE_URL || ''

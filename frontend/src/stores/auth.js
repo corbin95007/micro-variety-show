@@ -1,12 +1,30 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { supabase } from '../utils/supabase'
+import { requestPasswordReset as requestPasswordResetApi } from '../api/auth'
 import { sanitizeAuthNextPath, sanitizeInviteCode } from '../utils/authRedirects'
 import {
   clearPasswordRecoveryReady,
   clearPasswordRecoveryReadyForOtherUser,
   clearPasswordRecoveryState,
 } from '../utils/authRecovery'
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase()
+}
+
+function mapPasswordLoginError(error) {
+  const message = error?.message || ''
+  if (
+    message === 'Invalid login credentials' ||
+    message.includes('Invalid login credentials') ||
+    message.includes('Email not confirmed')
+  ) {
+    return new Error('邮箱或密码不正确；若刚注册请先完成邮箱确认，也可用邮箱验证码登录。')
+  }
+
+  return error
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
@@ -104,7 +122,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function register(email, password, nickname, options = {}) {
     clearPasswordRecoveryState()
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: normalizeEmail(email),
       password,
       options: {
         data: {
@@ -132,7 +150,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function sendEmailOtp(email) {
     clearPasswordRecoveryState()
     const { error } = await supabase.auth.signInWithOtp({
-      email,
+      email: normalizeEmail(email),
       options: {
         shouldCreateUser: false,
       },
@@ -143,7 +161,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function verifyEmailOtp(email, token) {
     clearPasswordRecoveryState()
     const { data, error } = await supabase.auth.verifyOtp({
-      email,
+      email: normalizeEmail(email),
       token,
       type: 'email',
     })
@@ -164,10 +182,10 @@ export const useAuthStore = defineStore('auth', () => {
   async function login(email, password) {
     clearPasswordRecoveryState()
     const { data, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: normalizeEmail(email),
       password,
     })
-    if (error) throw error
+    if (error) throw mapPasswordLoginError(error)
 
     if (data.session) {
       user.value = data.session.user
@@ -223,8 +241,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function requestPasswordReset(email) {
     clearPasswordRecoveryState()
-    const { error } = await supabase.auth.resetPasswordForEmail(email)
-    if (error) throw error
+    return requestPasswordResetApi(normalizeEmail(email))
   }
 
   async function updateNickname(nickname) {

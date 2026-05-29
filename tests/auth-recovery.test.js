@@ -44,6 +44,12 @@ const {
 
 const { handleRecoveryConsume } = await import('../api/auth/recovery/consume.js')
 
+const {
+  checkPasswordResetCooldown,
+  handlePasswordReset,
+  hashEmail,
+} = await import('../api/auth/password-reset.js')
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -665,5 +671,176 @@ describe('signed recovery handoff consume', () => {
       secret: 'secret-1',
     })
     expect(noAuthRes.statusCode).toBe(401)
+  })
+})
+
+describe('password reset proxy API', () => {
+  it('allows only POST', async () => {
+    const res = createRes()
+    await handlePasswordReset({ method: 'GET', headers: {}, body: {} }, res, {
+      env: { APP_BASE_URL: 'https://app.example.com' },
+      authClient: {},
+    })
+
+    expect(res.statusCode).toBe(405)
+    expect(res.headers.Allow).toBe('POST')
+  })
+
+  it('normalizes email and asks Supabase to send the dashboard-templated reset email', async () => {
+    const resetPasswordForEmail = vi.fn(async () => ({ error: null }))
+    const res = createRes()
+
+    await handlePasswordReset({
+      method: 'POST',
+      headers: { 'x-forwarded-for': '203.0.113.10' },
+      body: { email: '  USER@Example.COM  ' },
+    }, res, {
+      env: { APP_BASE_URL: 'https://app.example.com' },
+      authClient: { auth: { resetPasswordForEmail } },
+      cooldownStore: new Map(),
+      now: 1000,
+    })
+
+    expect(resetPasswordForEmail).toHaveBeenCalledWith('user@example.com')
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({ ok: true })
+  })
+
+  it('rejects missing and invalid email before calling Supabase', async () => {
+    const resetPasswordForEmail = vi.fn(async () => ({ error: null }))
+    const missing = createRes()
+    await handlePasswordReset({
+      method: 'POST',
+      headers: {},
+      body: { email: '   ' },
+    }, missing, {
+      authClient: { auth: { resetPasswordForEmail } },
+      cooldownStore: new Map(),
+    })
+
+    const invalid = createRes()
+    await handlePasswordReset({
+      method: 'POST',
+      headers: {},
+      body: { email: 'not-an-email' },
+    }, invalid, {
+      authClient: { auth: { resetPasswordForEmail } },
+      cooldownStore: new Map(),
+    })
+
+    expect(missing.statusCode).toBe(400)
+    expect(missing.body.error).toBe('请填写邮箱地址')
+    expect(invalid.statusCode).toBe(400)
+    expect(invalid.body.error).toBe('请填写有效的邮箱地址')
+    expect(resetPasswordForEmail).not.toHaveBeenCalled()
+  })
+
+  it('applies a 60 second cooldown by email hash and IP without storing plaintext email', async () => {
+    const store = new Map()
+    const emailHash = hashEmail('user@example.com')
+
+    expect(checkPasswordResetCooldown({
+      emailHash,
+      ip: '203.0.113.10',
+      now: 1000,
+      store,
+    })).toMatchObject({ ok: true })
+
+    const second = checkPasswordResetCooldown({
+      emailHash,
+      ip: '203.0.113.10',
+      now: 1500,
+      store,
+    })
+    expect(second.ok).toBe(false)
+    expect(second.retryAfterSeconds).toBe(60)
+    expect(JSON.stringify([...store.entries()])).not.toContain('user@example.com')
+
+    expect(checkPasswordResetCooldown({
+      emailHash,
+      ip: '203.0.113.10',
+      now: 61_001,
+      store,
+    })).toMatchObject({ ok: true })
+  })
+
+  it('returns a friendly cooldown response with retry seconds', async () => {
+    const resetPasswordForEmail = vi.fn(async () => ({ error: null }))
+    const res = createRes()
+
+    await handlePasswordReset({
+      method: 'POST',
+      headers: {},
+      body: { email: 'user@example.com' },
+    }, res, {
+      env: { APP_BASE_URL: 'https://app.example.com' },
+      authClient: { auth: { resetPasswordForEmail } },
+      checkCooldown: () => ({ ok: false, retryAfterSeconds: 42 }),
+    })
+
+    expect(resetPasswordForEmail).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(429)
+    expect(res.headers['Retry-After']).toBe('42')
+    expect(res.body).toMatchObject({
+      ok: true,
+      retryAfterSeconds: 42,
+    })
+    expect(res.body.message).toContain('42 秒')
+  })
+
+  it('maps Supabase 429 to a friendly response and logs only hashed identifiers', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const res = createRes()
+
+    await handlePasswordReset({
+      method: 'POST',
+      headers: { 'x-forwarded-for': '203.0.113.10' },
+      body: { email: 'user@example.com' },
+    }, res, {
+      env: { APP_BASE_URL: 'https://app.example.com' },
+      cooldownStore: new Map(),
+      authClient: {
+        auth: {
+          resetPasswordForEmail: vi.fn(async () => ({
+            error: {
+              status: 429,
+              message: 'Email rate limit exceeded',
+              code: 'over_email_send_rate_limit',
+            },
+          })),
+        },
+      },
+    })
+
+    expect(res.statusCode).toBe(429)
+    expect(res.body.message).toBe('请求过于频繁，请稍后再试。')
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('user@example.com')
+    expect(JSON.stringify(warn.mock.calls)).toContain(hashEmail('user@example.com'))
+  })
+
+  it('does not expose whether the email exists on Supabase errors', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const res = createRes()
+
+    await handlePasswordReset({
+      method: 'POST',
+      headers: {},
+      body: { email: 'missing@example.com' },
+    }, res, {
+      env: { APP_BASE_URL: 'https://app.example.com' },
+      cooldownStore: new Map(),
+      authClient: {
+        auth: {
+          resetPasswordForEmail: vi.fn(async () => ({
+            error: new Error('User not found'),
+          })),
+        },
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({ ok: true })
+    expect(res.body.message).not.toContain('User not found')
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('missing@example.com')
   })
 })

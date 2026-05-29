@@ -89,6 +89,10 @@ const otpCooldown = ref(0)
 const submitting = ref(false)
 let otpTimer = null
 
+function normalizeEmailInput(value) {
+  return value.trim().toLowerCase()
+}
+
 const isRegister = computed(() => mode.value === 'register')
 const authErrorMessage = computed(() => getAuthErrorMessage(route.query.auth_error))
 const submitText = computed(() => {
@@ -168,14 +172,16 @@ function startOtpCooldown() {
 }
 
 async function handleSendOtp() {
-  if (!email.value.trim()) {
+  const targetEmail = normalizeEmailInput(email.value)
+  if (!targetEmail) {
     showToast({ message: '请先填写邮箱', position: 'bottom' })
     return
   }
 
   otpSending.value = true
   try {
-    await auth.sendEmailOtp(email.value.trim())
+    await auth.sendEmailOtp(targetEmail)
+    email.value = targetEmail
     otpSent.value = true
     startOtpCooldown()
     showToast({ message: '如果邮箱可用，8 位验证码已发送', position: 'bottom' })
@@ -191,10 +197,14 @@ async function handleSubmit() {
   submitting.value = true
   try {
     if (mode.value === 'password') {
-      await auth.login(email.value, password.value)
+      const targetEmail = normalizeEmailInput(email.value)
+      email.value = targetEmail
+      await auth.login(targetEmail, password.value)
       router.push(getRedirectPath())
     } else if (mode.value === 'register') {
-      const data = await auth.register(email.value, password.value, nickname.value, {
+      const targetEmail = normalizeEmailInput(email.value)
+      email.value = targetEmail
+      const data = await auth.register(targetEmail, password.value, nickname.value, {
         redirect: getRedirectPath(),
         invite: inviteCode.value,
       })
@@ -226,7 +236,9 @@ async function handleSubmit() {
         showToast({ message: '请输入 8 位邮箱验证码', position: 'bottom' })
         return
       }
-      await auth.verifyEmailOtp(email.value.trim(), otpCode.value.trim())
+      const targetEmail = normalizeEmailInput(email.value)
+      email.value = targetEmail
+      await auth.verifyEmailOtp(targetEmail, otpCode.value.trim())
       router.push(getRedirectPath())
     }
   } catch (e) {
