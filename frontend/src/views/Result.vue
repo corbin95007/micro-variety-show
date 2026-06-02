@@ -40,7 +40,7 @@
     </div>
 
     <template v-else-if="result">
-      <template v-if="result.is_unlocked">
+      <template v-if="unlock.isUnlocked">
         <section class="hero-section">
           <div class="hero-card">
             <div class="hero-meta">{{ formatDate(result.created_at) }}</div>
@@ -122,6 +122,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useUnlockStore } from '../stores/unlock'
 import { supabase } from '../utils/supabase'
 import { formatRequestError, parseApiResponse } from '../utils/http'
 import SpectrumBar from '../components/SpectrumBar.vue'
@@ -130,6 +131,7 @@ import { RESULT as R, RESULT_TAG_MEANINGS } from '../constants'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const unlock = useUnlockStore()
 const result = ref(null)
 const activeTag = ref('')
 const loading = ref(true)
@@ -170,6 +172,9 @@ async function loadResult() {
     return
   }
 
+  // 缓存优先：先用 store 里的解锁态瞬显，再用接口返回的权威值纠正并回写
+  unlock.hydrate(auth.user.id)
+
   try {
     const { data, error } = await supabase.auth.getSession()
     if (error) throw error
@@ -190,6 +195,9 @@ async function loadResult() {
       notFoundMessage: '未找到这份测试结果',
     })
     activeTag.value = result.value?.tags?.[0] || ''
+
+    // 解锁是账号级全局结论，把权威的 is_unlocked 回写 store 作为单一真相源
+    unlock.setUnlocked(auth.user.id, Boolean(result.value?.is_unlocked), result.value?.unlock_method)
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === '登录状态已失效，请重新登录') {

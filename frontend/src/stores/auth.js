@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { supabase } from '../utils/supabase'
 import { requestPasswordReset as requestPasswordResetApi } from '../api/auth'
 import { sanitizeAuthNextPath, sanitizeInviteCode } from '../utils/authRedirects'
+import { useUnlockStore } from './unlock'
 import {
   clearPasswordRecoveryReady,
   clearPasswordRecoveryReadyForOtherUser,
@@ -37,11 +38,13 @@ export const useAuthStore = defineStore('auth', () => {
     if (authSubscription) return
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const previousUserId = user.value?.id
       user.value = session?.user ?? null
 
       if (!user.value) {
         profile.value = null
         clearPasswordRecoveryState()
+        useUnlockStore().clear(previousUserId)
         return
       }
 
@@ -200,10 +203,12 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
+    const previousUserId = user.value?.id
     const { error } = await supabase.auth.signOut()
     if (error) throw error
 
     clearPasswordRecoveryState()
+    useUnlockStore().clear(previousUserId)
     user.value = null
     profile.value = null
   }

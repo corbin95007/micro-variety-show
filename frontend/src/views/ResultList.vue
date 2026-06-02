@@ -52,8 +52,8 @@
           </div>
         </div>
         <div class="result-item-right">
-          <span class="status-badge" :class="r.is_unlocked ? 'unlocked' : 'locked'">
-            {{ r.is_unlocked ? RL.unlocked : RL.locked }}
+          <span class="status-badge" :class="unlock.isUnlocked ? 'unlocked' : 'locked'">
+            {{ unlock.isUnlocked ? RL.unlocked : RL.locked }}
           </span>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-muted)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
@@ -66,12 +66,14 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useUnlockStore } from '../stores/unlock'
 import { supabase } from '../utils/supabase'
 import { formatRequestError, parseApiResponse } from '../utils/http'
 import { RESULT_LIST as RL } from '../constants'
 
 const router = useRouter()
 const auth = useAuthStore()
+const unlock = useUnlockStore()
 const results = ref([])
 const loading = ref(true)
 const errorMessage = ref('')
@@ -98,6 +100,9 @@ async function loadResults() {
     return
   }
 
+  // 缓存优先：先用 store 解锁态瞬显徽章，再用接口返回的权威值纠正并回写
+  unlock.hydrate(auth.user.id)
+
   try {
     const { data: sessionData, error } = await supabase.auth.getSession()
     if (error) throw error
@@ -117,6 +122,15 @@ async function loadResults() {
       unauthorizedMessage: '登录状态已失效，请重新登录',
     })
     results.value = Array.isArray(payload) ? payload : []
+
+    // 解锁是账号级全局结论，所有结果共用同一 is_unlocked，取其一回写 store
+    if (results.value.length) {
+      unlock.setUnlocked(
+        auth.user.id,
+        Boolean(results.value[0].is_unlocked),
+        results.value[0].unlock_method,
+      )
+    }
   } catch (error) {
     if (error instanceof Error && error.message === '登录状态已失效，请重新登录') {
       errorAction.value = 'login'

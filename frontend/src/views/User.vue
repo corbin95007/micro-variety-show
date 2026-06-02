@@ -30,9 +30,16 @@
             <span class="info-key">{{ U.referralCountLabel }}</span>
             <div class="referral-progress">
               <div class="referral-dots">
-                <span v-for="i in 3" :key="i" class="dot" :class="{ filled: i <= referralInfo.referral_count }"></span>
+                <span
+                  v-for="i in 3"
+                  :key="i"
+                  class="dot"
+                  :class="{ filled: referralKnown && i <= referralInfo.referral_count }"
+                ></span>
               </div>
-              <span class="referral-count">{{ referralInfo.referral_count }} / {{ referralInfo.target }}</span>
+              <span class="referral-count">
+                {{ referralKnown ? `${referralInfo.referral_count} / ${referralInfo.target}` : '— / 3' }}
+              </span>
             </div>
           </div>
           <div class="friend-invite-block">
@@ -136,21 +143,29 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { getPaymentStatus, createPayment, getLatestPaymentStatus } from '../api/payment'
+import { getPaymentStatus, createPayment } from '../api/payment'
 import { getReferralInfo, trackReferral } from '../api/referral'
 import { useAuthStore } from '../stores/auth'
+import { useUnlockStore } from '../stores/unlock'
+import { readLocalCache, removeLocalCache, writeLocalCache } from '../utils/localCache'
 import { formatRequestError } from '../utils/http'
 import { USER as U, TOAST } from '../constants'
+
+const REFERRAL_CACHE_NAMESPACE = 'referral'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+const unlock = useUnlockStore()
 const referralInfo = ref(buildEmptyReferralInfo())
+const referralKnown = ref(false)
 const friendInviteCode = ref('')
 const isSubmittingFriendInvite = ref(false)
 const isCreatingPayment = ref(false)
 const isPollingPayment = ref(false)
-const hasUnlockedAccess = ref(false)
+// 解锁态统一走 unlock store（单一真相源，缓存优先瞬显真实态）
+const hasUnlockedAccess = computed(() => unlock.isUnlocked)
+const isUnlockStatusUnknown = computed(() => !unlock.isKnown)
 const paymentNotice = ref({
   visible: false,
   tone: 'pending',
@@ -167,13 +182,18 @@ watch(
   async (userId) => {
     if (!userId) {
       referralInfo.value = buildEmptyReferralInfo()
+      referralKnown.value = false
       friendInviteCode.value = ''
-      hasUnlockedAccess.value = false
+      unlock.hydrate(null)
       paymentPollToken += 1
       activePaymentId = ''
       clearPaymentNotice()
       return
     }
+
+    // 缓存优先：先用本地缓存瞬显真实态（无骨架无闪烁），再后台 revalidate
+    hydrateReferralInfo(userId)
+    unlock.hydrate(userId)
 
     await Promise.all([
       loadReferralInfo(),
@@ -212,30 +232,35 @@ onBeforeUnmount(() => {
 
 const paymentButtonDisabled = computed(() => (
   hasUnlockedAccess.value ||
+  isUnlockStatusUnknown.value ||
   isCreatingPayment.value ||
   isPollingPayment.value
 ))
 
 const paymentButtonText = computed(() => {
   if (hasUnlockedAccess.value) return '已解锁'
+  if (isUnlockStatusUnknown.value) return '状态确认中...'
   if (isPollingPayment.value) return '支付确认中...'
   if (isCreatingPayment.value) return '跳转支付宝中...'
   return U.paymentBtn
 })
 
-const paymentCardTitle = computed(() => (
-  hasUnlockedAccess.value ? '结果解锁已生效' : U.paymentTitle
-))
+const paymentCardTitle = computed(() => {
+  if (isUnlockStatusUnknown.value) return U.paymentTitle
+  return hasUnlockedAccess.value ? '结果解锁已生效' : U.paymentTitle
+})
 
-const paymentCardDesc = computed(() => (
-  hasUnlockedAccess.value
+const paymentCardDesc = computed(() => {
+  if (isUnlockStatusUnknown.value) return '正在确认解锁状态…'
+  return hasUnlockedAccess.value
     ? '历史结果和后续新结果都已可直接查看。'
     : U.paymentDesc
-))
+})
 
-const paymentCardBadge = computed(() => (
-  hasUnlockedAccess.value ? '已生效' : U.paymentPrice
-))
+const paymentCardBadge = computed(() => {
+  if (isUnlockStatusUnknown.value) return ''
+  return hasUnlockedAccess.value ? '已生效' : U.paymentPrice
+})
 
 function buildEmptyReferralInfo() {
   return {
@@ -270,22 +295,54 @@ function applyRouteInviteCode() {
   }
 }
 
+function readReferralCache(userId) {
+  const cached = readLocalCache(REFERRAL_CACHE_NAMESPACE, userId)
+  if (!cached) return null
+
+  return {
+    ...buildEmptyReferralInfo(),
+    ...cached,
+  }
+}
+
+function hydrateReferralInfo(userId) {
+  const cached = readReferralCache(userId)
+  if (cached) {
+    referralInfo.value = cached
+    referralKnown.value = true
+    applyRouteInviteCode()
+  } else {
+    referralInfo.value = buildEmptyReferralInfo()
+    referralKnown.value = false
+  }
+}
+
 async function loadReferralInfo() {
+  const userId = auth.user?.id
   try {
-    referralInfo.value = await getReferralInfo()
+    const info = await getReferralInfo()
+    referralInfo.value = info
+    referralKnown.value = true
+    if (userId) {
+      writeLocalCache(REFERRAL_CACHE_NAMESPACE, userId, info)
+    }
     applyRouteInviteCode()
   } catch {
-    referralInfo.value = buildEmptyReferralInfo()
+    // 拉取失败时保留缓存里的已知态，避免把已显示的进度闪回 0/3
+    if (!referralKnown.value) {
+      referralInfo.value = buildEmptyReferralInfo()
+    }
   }
 }
 
 async function loadLatestPaymentState() {
+  const userId = auth.user?.id
+  if (!userId) return
+
   try {
-    const payload = await getLatestPaymentStatus()
+    const payload = await unlock.revalidate(userId)
 
-    hasUnlockedAccess.value = Boolean(payload.unlocked)
-
-    if (hasUnlockedAccess.value && !route.query.payment_id) {
+    if (unlock.isUnlocked && !route.query.payment_id) {
       setPaymentNotice(
         'success',
         payload.unlock_method === 'payment' ? '购买已完成' : '结果已解锁',
@@ -293,17 +350,18 @@ async function loadLatestPaymentState() {
           ? '支付成功后，历史结果和后续新结果都会自动解锁。'
           : '你的结果访问权限已经生效，历史结果和后续新结果都会自动解锁。'
       )
-    } else if (!hasUnlockedAccess.value && paymentNotice.value.tone === 'success' && !route.query.payment_id) {
+    } else if (!unlock.isUnlocked && paymentNotice.value.tone === 'success' && !route.query.payment_id) {
       clearPaymentNotice()
     }
   } catch (error) {
-    hasUnlockedAccess.value = false
-
-    setPaymentNotice(
-      'failed',
-      '支付状态同步失败',
-      formatRequestError(error, '支付状态获取失败，请稍后再试')
-    )
+    // revalidate 失败时保留 store 里的已知态（缓存优先），仅在完全未知时提示
+    if (isUnlockStatusUnknown.value) {
+      setPaymentNotice(
+        'failed',
+        '支付状态同步失败',
+        formatRequestError(error, '支付状态获取失败，请稍后再试')
+      )
+    }
   }
 }
 
@@ -371,7 +429,7 @@ async function pollPaymentResult(paymentId) {
 
       const currentStatus = payload.payment?.status
       if (payload.unlocked) {
-        hasUnlockedAccess.value = true
+        unlock.setUnlocked(auth.user?.id, true, payload.unlock_method)
         setPaymentNotice(
           'success',
           payload.unlock_method === 'payment' ? '购买已完成' : '结果已解锁',
@@ -522,7 +580,11 @@ function goLogin() {
 }
 
 async function handleLogout() {
+  const userId = auth.user?.id
   await auth.logout()
+  if (userId) {
+    removeLocalCache(REFERRAL_CACHE_NAMESPACE, userId)
+  }
   router.push('/')
 }
 </script>
