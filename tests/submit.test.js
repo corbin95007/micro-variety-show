@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://example.supabase.co'
 process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key'
 
-const { default: handler, buildSubmitResponse } = await import('../api/test/submit.js')
+const { default: handler, buildSubmitResponse } = await import('../api/_lib/test-routes/submit.js')
 
 describe('test submit helpers', () => {
   it('returns unlock state in the submit response', () => {

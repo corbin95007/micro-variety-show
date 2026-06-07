@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://example.supabase.co'
 process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key'
 
-const { buildDraftPayload } = await import('../api/test/draft.js')
+const { buildDraftPayload } = await import('../api/_lib/test-routes/draft.js')
 
 describe('test draft helpers', () => {
   it('builds a user-scoped draft upsert payload', () => {

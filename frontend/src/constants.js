@@ -8,6 +8,13 @@ export const HOME = {
   testEntryDesc: '探索你的女性主义光谱坐标',
   voteEntryTitle: '投票入口',
   voteEntryDesc: '即将开放',
+  xiaohongshuOfficial: '小红书官号',
+  douyinOfficial: '抖音官号',
+}
+
+export const OFFICIAL_LINKS = {
+  xiaohongshu: import.meta.env.VITE_XIAOHONGSHU_OFFICIAL_URL || '',
+  douyin: import.meta.env.VITE_DOUYIN_OFFICIAL_URL || '',
 }
 
 export const TEST_HUB = {
@@ -115,6 +122,15 @@ export const USER = {
   paymentDesc: '一次购买，永久解锁所有测试结果',
   paymentPrice: '¥9.9',
   paymentBtn: '立即购买',
+  feedbackBtn: '问题反馈',
+  feedbackDialogTitle: '问题反馈',
+  feedbackPlaceholder: '请描述你遇到的问题，越具体越方便我们排查',
+  feedbackSubmitting: '提交中...',
+  feedbackSubmitBtn: '提交反馈',
+  feedbackExamples: [
+    '邀请码、邀请人数或好友绑定状态显示异常',
+    '登录、注册、支付或页面跳转时遇到问题',
+  ],
   logoutBtn: '退出登录',
 }
 
@@ -145,6 +161,11 @@ export const TOAST = {
   friendInviteSelf: '不能填写自己的邀请码',
   pleaseLogin: '请先登录',
   notLoggedIn: '请先登录后继续',
+  officialLinkMissing: '官号链接尚未配置',
+  feedbackRequired: '请先填写反馈内容',
+  feedbackTooShort: '反馈内容至少需要 10 个字',
+  feedbackTooLong: '反馈内容不能超过 1000 个字',
+  feedbackSubmitted: '反馈已提交',
   paymentComingSoon: '付费功能即将上线',
   loading: '加载中',
 }

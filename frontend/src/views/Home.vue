@@ -44,13 +44,47 @@
         </div>
       </button>
     </div>
+
+    <div class="official-section">
+      <button
+        type="button"
+        class="official-link-btn"
+        @click="openOfficialLink(OFFICIAL_LINKS.xiaohongshu)"
+      >
+        <span>{{ HOME_TEXT.xiaohongshuOfficial }}</span>
+        <svg class="official-link-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="official-link-btn"
+        @click="openOfficialLink(OFFICIAL_LINKS.douyin)"
+      >
+        <span>{{ HOME_TEXT.douyinOfficial }}</span>
+        <svg class="official-link-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { SITE, HOME as HOME_TEXT } from '../constants'
+import { showToast } from 'vant'
+import { SITE, HOME as HOME_TEXT, OFFICIAL_LINKS, TOAST } from '../constants'
 
 const bannerImages = ['/banner1.jpg', '/banner2.jpg', '/banner3.jpg']
+
+function openOfficialLink(url) {
+  const officialUrl = String(url || '').trim()
+  if (!officialUrl) {
+    showToast({ message: TOAST.officialLinkMissing, position: 'bottom' })
+    return
+  }
+
+  window.open(officialUrl, '_blank', 'noopener,noreferrer')
+}
 </script>
 
 <style scoped>
@@ -170,4 +204,45 @@ const bannerImages = ['/banner1.jpg', '/banner2.jpg', '/banner3.jpg']
 }
 
 .entry-arrow { color: var(--color-ink-muted); }
+
+.official-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 20px 24px;
+}
+
+.official-link-btn {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.official-link-btn:active {
+  transform: scale(0.98);
+  border-color: var(--color-primary);
+}
+
+.official-link-btn span {
+  overflow-wrap: anywhere;
+}
+
+.official-link-arrow {
+  flex-shrink: 0;
+  color: var(--color-ink-muted);
+}
 </style>

@@ -134,8 +134,53 @@
         </div>
       </section>
 
+      <button type="button" v-if="auth.user" class="feedback-btn" @click="openFeedbackDialog">{{ U.feedbackBtn }}</button>
       <button type="button" v-if="auth.user" class="logout-btn" @click="handleLogout">{{ U.logoutBtn }}</button>
     </div>
+
+    <van-dialog
+      v-model:show="showFeedbackDialog"
+      :title="U.feedbackDialogTitle"
+      :show-confirm-button="false"
+    >
+      <div class="feedback-dialog-body">
+        <div class="feedback-examples">
+          <div
+            v-for="example in U.feedbackExamples"
+            :key="example"
+            class="feedback-example"
+          >
+            {{ example }}
+          </div>
+        </div>
+        <textarea
+          v-model="feedbackMessage"
+          class="feedback-textarea"
+          :maxlength="FEEDBACK_MAX_LENGTH"
+          :placeholder="U.feedbackPlaceholder"
+          :disabled="isSubmittingFeedback"
+        ></textarea>
+        <div class="feedback-length">{{ feedbackLengthText }}</div>
+        <div class="feedback-actions">
+          <button
+            type="button"
+            class="feedback-action feedback-action-secondary"
+            :disabled="isSubmittingFeedback"
+            @click="closeFeedbackDialog"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="feedback-action feedback-action-primary"
+            :disabled="isSubmittingFeedback"
+            @click="handleFeedbackSubmit"
+          >
+            {{ isSubmittingFeedback ? U.feedbackSubmitting : U.feedbackSubmitBtn }}
+          </button>
+        </div>
+      </div>
+    </van-dialog>
   </div>
 </template>
 
@@ -143,6 +188,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
+import { submitFeedback } from '../api/feedback'
 import { getPaymentStatus, createPayment } from '../api/payment'
 import { getReferralInfo, trackReferral } from '../api/referral'
 import { useAuthStore } from '../stores/auth'
@@ -152,6 +198,8 @@ import { formatRequestError } from '../utils/http'
 import { USER as U, TOAST } from '../constants'
 
 const REFERRAL_CACHE_NAMESPACE = 'referral'
+const FEEDBACK_MIN_LENGTH = 10
+const FEEDBACK_MAX_LENGTH = 1000
 
 const router = useRouter()
 const route = useRoute()
@@ -161,11 +209,15 @@ const referralInfo = ref(buildEmptyReferralInfo())
 const referralKnown = ref(false)
 const friendInviteCode = ref('')
 const isSubmittingFriendInvite = ref(false)
+const showFeedbackDialog = ref(false)
+const feedbackMessage = ref('')
+const isSubmittingFeedback = ref(false)
 const isCreatingPayment = ref(false)
 const isPollingPayment = ref(false)
 // 解锁态统一走 unlock store（单一真相源，缓存优先瞬显真实态）
 const hasUnlockedAccess = computed(() => unlock.isUnlocked)
 const isUnlockStatusUnknown = computed(() => !unlock.isKnown)
+const feedbackLengthText = computed(() => `${feedbackMessage.value.trim().length} / ${FEEDBACK_MAX_LENGTH}`)
 const paymentNotice = ref({
   visible: false,
   tone: 'pending',
@@ -505,6 +557,55 @@ async function submitFriendInvite() {
     showToast({ message, position: 'bottom' })
   } finally {
     isSubmittingFriendInvite.value = false
+  }
+}
+
+function openFeedbackDialog() {
+  if (!auth.user) {
+    showToast({ message: TOAST.notLoggedIn, position: 'bottom' })
+    return
+  }
+
+  showFeedbackDialog.value = true
+}
+
+function closeFeedbackDialog() {
+  if (isSubmittingFeedback.value) return
+  showFeedbackDialog.value = false
+}
+
+function validateFeedbackMessage(message) {
+  if (!message) return TOAST.feedbackRequired
+  if (message.length < FEEDBACK_MIN_LENGTH) return TOAST.feedbackTooShort
+  if (message.length > FEEDBACK_MAX_LENGTH) return TOAST.feedbackTooLong
+  return ''
+}
+
+async function handleFeedbackSubmit() {
+  if (isSubmittingFeedback.value) return
+
+  const message = feedbackMessage.value.trim()
+  const validationMessage = validateFeedbackMessage(message)
+  if (validationMessage) {
+    showToast({ message: validationMessage, position: 'bottom' })
+    return
+  }
+
+  isSubmittingFeedback.value = true
+
+  try {
+    const payload = await submitFeedback(message, {
+      pageUrl: window.location.href,
+      userAgent: navigator.userAgent,
+    })
+    feedbackMessage.value = ''
+    showFeedbackDialog.value = false
+    showToast({ message: payload.warning || TOAST.feedbackSubmitted, position: 'bottom' })
+  } catch (error) {
+    const errorMessage = formatRequestError(error, '反馈提交失败，请稍后再试')
+    showToast({ message: errorMessage, position: 'bottom' })
+  } finally {
+    isSubmittingFeedback.value = false
   }
 }
 
@@ -975,6 +1076,128 @@ async function handleLogout() {
 }
 
 .logout-btn:active { color: var(--color-accent); border-color: var(--color-accent); }
+
+.feedback-btn {
+  width: 100%;
+  padding: 14px;
+  border: 1.5px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.feedback-btn:active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.feedback-dialog-body {
+  padding: 18px 20px 20px;
+}
+
+.feedback-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.feedback-example {
+  position: relative;
+  padding-left: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-ink-light);
+}
+
+.feedback-example::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.72em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-primary-light);
+}
+
+.feedback-textarea {
+  width: 100%;
+  min-height: 132px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-size: 14px;
+  line-height: 1.7;
+  font-family: var(--font-body);
+  outline: none;
+  resize: none;
+  transition: border-color 0.2s ease;
+}
+
+.feedback-textarea:focus {
+  border-color: var(--color-primary);
+}
+
+.feedback-textarea::placeholder {
+  color: var(--color-ink-muted);
+}
+
+.feedback-textarea:disabled {
+  opacity: 0.7;
+}
+
+.feedback-length {
+  margin-top: 6px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.feedback-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.feedback-action {
+  min-height: 42px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.feedback-action:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.feedback-action-secondary {
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-ink-light);
+}
+
+.feedback-action-primary {
+  border: 1.5px solid var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.feedback-action:active:not(:disabled) {
+  transform: scale(0.98);
+}
 
 .guest-card {
   text-align: center;

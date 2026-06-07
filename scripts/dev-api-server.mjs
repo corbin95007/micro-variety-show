@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url)
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const apiRoot = path.join(root, 'api')
 const host = '127.0.0.1'
-const port = 3000
+let port = 3000
 const mirrorBaseRoot = path.join(root, '.tmp', 'dev-api-esm')
 
 const MIME_JSON = 'application/json; charset=utf-8'
@@ -43,6 +43,11 @@ function loadDotEnv() {
 }
 
 loadDotEnv()
+
+const configuredPort = Number.parseInt(process.env.API_PORT || process.env.PORT || '', 10)
+if (Number.isFinite(configuredPort) && configuredPort > 0) {
+  port = configuredPort
+}
 
 function getApiVersion() {
   return String(Math.max(...listApiFiles().map((filePath) => fs.statSync(filePath).mtimeMs)))
@@ -78,13 +83,36 @@ function matchRoute(requestPath) {
   for (const filePath of listApiFiles()) {
     const relative = path.relative(apiRoot, filePath).replace(/\\/g, '/').replace(/\.js$/, '')
     const routeSegments = pathSegments(relative)
-    if (routeSegments.length !== requestSegments.length) continue
 
     const query = {}
     let matched = true
+    let consumedAllRequestSegments = routeSegments.length === requestSegments.length
 
     for (let index = 0; index < routeSegments.length; index += 1) {
       const routeSegment = routeSegments[index]
+
+      if (routeSegment.startsWith('[...') && routeSegment.endsWith(']')) {
+        if (index !== routeSegments.length - 1) {
+          matched = false
+          break
+        }
+
+        const remainingSegments = requestSegments.slice(index).map((segment) => decodeURIComponent(segment))
+        if (remainingSegments.length === 0) {
+          matched = false
+          break
+        }
+
+        query[routeSegment.slice(4, -1)] = remainingSegments
+        consumedAllRequestSegments = true
+        break
+      }
+
+      if (index >= requestSegments.length) {
+        matched = false
+        break
+      }
+
       const requestSegment = decodeURIComponent(requestSegments[index])
 
       if (routeSegment.startsWith('[') && routeSegment.endsWith(']')) {
@@ -98,7 +126,9 @@ function matchRoute(requestPath) {
       }
     }
 
-    if (matched) return { filePath, query }
+    if (matched && consumedAllRequestSegments) {
+      return { filePath, query }
+    }
   }
 
   return null
