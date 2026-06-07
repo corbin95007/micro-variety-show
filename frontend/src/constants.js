@@ -1,6 +1,6 @@
 export const SITE = {
-  name: '微综艺',
-  subtitle: '一档关于观点与立场的实验',
+  name: 'Grandwitch',
+  subtitle: '一次增进人与人之间了解的测试',
 }
 
 export const HOME = {
@@ -14,7 +14,7 @@ export const TEST_HUB = {
   pageTitle: '测试',
   testName: '女性主义维度测试',
   testDesc: '四个维度，定位你在女性主义光谱上的坐标',
-  testMeta: ['约 5 分钟', '免费参与'],
+  testMeta: ['约 5-10 分钟', '免费参与'],
   testCta: '开始测试',
   resultListEntry: '查看测试结果列表',
   resetTestBtn: '重置测试',
