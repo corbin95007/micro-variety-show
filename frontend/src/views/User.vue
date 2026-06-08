@@ -293,7 +293,7 @@ const paymentButtonText = computed(() => {
   if (hasUnlockedAccess.value) return '已解锁'
   if (isUnlockStatusUnknown.value) return '状态确认中...'
   if (isPollingPayment.value) return '支付确认中...'
-  if (isCreatingPayment.value) return '跳转支付宝中...'
+  if (isCreatingPayment.value) return '跳转支付中...'
   return U.paymentBtn
 })
 
@@ -470,7 +470,7 @@ async function pollPaymentResult(paymentId) {
   setPaymentNotice(
     'pending',
     '支付结果确认中',
-    '已从支付宝跳回，正在等待支付宝异步回调确认，请稍候。'
+    '已返回本站，正在等待支付平台确认，请稍候。'
   )
 
   try {
@@ -647,6 +647,25 @@ function submitPaymentForm(paymentAction) {
   form.submit()
 }
 
+function getPaymentUrl(payload) {
+  return payload?.payment_url || payload?.payurl || ''
+}
+
+function redirectToPayment(payload) {
+  const paymentUrl = getPaymentUrl(payload)
+  if (paymentUrl) {
+    window.location.href = paymentUrl
+    return
+  }
+
+  if (payload?.payment_action) {
+    submitPaymentForm(payload.payment_action)
+    return
+  }
+
+  throw new Error('支付跳转参数缺失')
+}
+
 async function handlePayment() {
   if (!auth.user) {
     showToast({ message: TOAST.notLoggedIn, position: 'bottom' })
@@ -658,8 +677,8 @@ async function handlePayment() {
   isCreatingPayment.value = true
 
   try {
-    const payload = await createPayment('alipay')
-    submitPaymentForm(payload.payment_action)
+    const payload = await createPayment()
+    redirectToPayment(payload)
   } catch (error) {
     const message = formatRequestError(error, '创建支付单失败，请稍后再试')
     setPaymentNotice('failed', '无法发起支付', message)

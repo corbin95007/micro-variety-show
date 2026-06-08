@@ -5,16 +5,24 @@ process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://example.supabase
 process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key'
 
 const {
+  buildQixiangOrderParams,
   buildAlipayWapPayForm,
   formatAmountFenToYuan,
   formatAlipayTimestamp,
   generateProviderOrderNo,
+  getActivePaymentProvider,
   getAlipayConfig,
+  getPaymentProduct,
   getPaymentRuntimeErrorMessage,
   isPaymentsSchemaMismatch,
+  queryQixiangTrade,
   queryAlipayTrade,
+  resolvePaymentProviderForCreate,
+  serializeQixiangParamsForSigning,
   signAlipayParams,
+  signQixiangParams,
   verifyAlipaySignature,
+  verifyQixiangSignature,
 } = await import('../api/_lib/payment.js')
 const {
   applyUnlockStateToResult,
@@ -30,6 +38,54 @@ describe('payment helpers', () => {
     const orderNo = generateProviderOrderNo('alipay')
 
     expect(orderNo).toMatch(/^ALI\d{14}[A-F0-9]{8}$/)
+  })
+
+  it('generates stable payqixiang order numbers', () => {
+    const orderNo = generateProviderOrderNo('payqixiang')
+
+    expect(orderNo).toMatch(/^QX\d{14}[A-F0-9]{8}$/)
+  })
+
+  it('defaults active provider to alipay and lets server env override creates', () => {
+    const originalEnv = {
+      PAYMENT_ACTIVE_PROVIDER: process.env.PAYMENT_ACTIVE_PROVIDER,
+    }
+
+    try {
+      delete process.env.PAYMENT_ACTIVE_PROVIDER
+      expect(getActivePaymentProvider()).toBe('alipay')
+      expect(resolvePaymentProviderForCreate('payqixiang')).toBe('payqixiang')
+
+      process.env.PAYMENT_ACTIVE_PROVIDER = 'payqixiang'
+      expect(getActivePaymentProvider()).toBe('payqixiang')
+      expect(resolvePaymentProviderForCreate('alipay')).toBe('payqixiang')
+    } finally {
+      if (originalEnv.PAYMENT_ACTIVE_PROVIDER == null) {
+        delete process.env.PAYMENT_ACTIVE_PROVIDER
+      } else {
+        process.env.PAYMENT_ACTIVE_PROVIDER = originalEnv.PAYMENT_ACTIVE_PROVIDER
+      }
+    }
+  })
+
+  it('uses server-side test amount cents when configured', () => {
+    const originalEnv = {
+      PAYMENT_TEST_AMOUNT_CENTS: process.env.PAYMENT_TEST_AMOUNT_CENTS,
+    }
+
+    try {
+      delete process.env.PAYMENT_TEST_AMOUNT_CENTS
+      expect(getPaymentProduct('report_unlock').amountFen).toBe(990)
+
+      process.env.PAYMENT_TEST_AMOUNT_CENTS = '1'
+      expect(getPaymentProduct('report_unlock').amountFen).toBe(1)
+    } finally {
+      if (originalEnv.PAYMENT_TEST_AMOUNT_CENTS == null) {
+        delete process.env.PAYMENT_TEST_AMOUNT_CENTS
+      } else {
+        process.env.PAYMENT_TEST_AMOUNT_CENTS = originalEnv.PAYMENT_TEST_AMOUNT_CENTS
+      }
+    }
   })
 
   it('uses the alipay timestamp shape', () => {
@@ -67,6 +123,76 @@ describe('payment helpers', () => {
         publicKey
       )
     ).toBe(true)
+  })
+
+  it('signs payqixiang params with ascii key ordering and excludes empty/sign fields', () => {
+    const params = {
+      money: '0.01',
+      name: '微综艺测试结果解锁',
+      notify_url: 'https://example.com/api/payment/notify/payqixiang',
+      out_trade_no: 'QX20260608000000AABBCCDD',
+      pid: '1001',
+      return_url: 'https://example.com/user?payment_id=1&provider=payqixiang',
+      sign: 'ignored',
+      sign_type: 'MD5',
+      type: 'alipay',
+      empty: '',
+    }
+
+    expect(serializeQixiangParamsForSigning(params)).toBe(
+      'money=0.01&name=微综艺测试结果解锁&notify_url=https://example.com/api/payment/notify/payqixiang&out_trade_no=QX20260608000000AABBCCDD&pid=1001&return_url=https://example.com/user?payment_id=1&provider=payqixiang&type=alipay'
+    )
+
+    const sign = signQixiangParams(params, 'test-secret')
+    expect(verifyQixiangSignature({ ...params, sign }, 'test-secret')).toBe(true)
+    expect(verifyQixiangSignature({ ...params, money: '9.90', sign }, 'test-secret')).toBe(false)
+  })
+
+  it('builds payqixiang jump order params without exposing the key', () => {
+    const originalEnv = {
+      APP_BASE_URL: process.env.APP_BASE_URL,
+      QIXIANG_PID: process.env.QIXIANG_PID,
+      QIXIANG_KEY: process.env.QIXIANG_KEY,
+      QIXIANG_API_URL: process.env.QIXIANG_API_URL,
+      QIXIANG_QUERY_URL: process.env.QIXIANG_QUERY_URL,
+    }
+
+    try {
+      process.env.APP_BASE_URL = 'https://micro-variety-show.vercel.app'
+      process.env.QIXIANG_PID = '1001'
+      process.env.QIXIANG_KEY = 'test-secret'
+      process.env.QIXIANG_API_URL = 'https://api.payqixiang.cn/mapi.php'
+      process.env.QIXIANG_QUERY_URL = 'https://api.payqixiang.cn/api.php'
+
+      const { params } = buildQixiangOrderParams({
+        req: { headers: { 'x-forwarded-for': '203.0.113.8' } },
+        paymentId: 1,
+        providerOrderNo: 'QX20260608000000AABBCCDD',
+        product: {
+          amountFen: 1,
+          subject: '微综艺测试结果解锁',
+        },
+      })
+
+      expect(params.pid).toBe('1001')
+      expect(params.type).toBe('alipay')
+      expect(params.money).toBe('0.01')
+      expect(params.device).toBe('jump')
+      expect(params.clientip).toBe('203.0.113.8')
+      expect(params.notify_url).toBe('https://micro-variety-show.vercel.app/api/payment/notify/payqixiang')
+      expect(params.return_url).toBe('https://micro-variety-show.vercel.app/user?payment_id=1&provider=payqixiang')
+      expect(params.sign).toMatch(/^[a-f0-9]{32}$/)
+      expect(Object.values(params)).not.toContain('test-secret')
+    } finally {
+      Object.entries(originalEnv).forEach(([key, value]) => {
+        if (value == null) {
+          delete process.env[key]
+          return
+        }
+
+        process.env[key] = value
+      })
+    }
   })
 
   it('normalizes sandbox env aliases and notify URLs', () => {
@@ -271,6 +397,62 @@ describe('payment helpers', () => {
 
       expect(queried.payload.trade_status).toBe('TRADE_SUCCESS')
       expect(queried.responseSignatureValid).toBe(false)
+    } finally {
+      global.fetch = originalFetch
+      Object.entries(originalEnv).forEach(([key, value]) => {
+        if (value == null) {
+          delete process.env[key]
+          return
+        }
+
+        process.env[key] = value
+      })
+    }
+  })
+
+  it('queries payqixiang order status without leaking the query url into errors', async () => {
+    const originalEnv = {
+      APP_BASE_URL: process.env.APP_BASE_URL,
+      QIXIANG_PID: process.env.QIXIANG_PID,
+      QIXIANG_KEY: process.env.QIXIANG_KEY,
+      QIXIANG_QUERY_URL: process.env.QIXIANG_QUERY_URL,
+    }
+    const originalFetch = global.fetch
+
+    try {
+      process.env.APP_BASE_URL = 'https://micro-variety-show.vercel.app'
+      process.env.QIXIANG_PID = '1001'
+      process.env.QIXIANG_KEY = 'test-secret'
+      process.env.QIXIANG_QUERY_URL = 'https://api.payqixiang.cn/api.php'
+
+      global.fetch = vi.fn(async (url) => {
+        expect(String(url)).toContain('act=order')
+        expect(String(url)).toContain('pid=1001')
+        expect(String(url)).toContain('key=test-secret')
+        expect(String(url)).toContain('out_trade_no=QX20260608000000AABBCCDD')
+
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            code: 1,
+            status: 1,
+            pid: '1001',
+            type: 'alipay',
+            out_trade_no: 'QX20260608000000AABBCCDD',
+            trade_no: '202606082200000001',
+            money: '0.01',
+          }),
+        }
+      })
+
+      const queried = await queryQixiangTrade({
+        req: { headers: {} },
+        providerOrderNo: 'QX20260608000000AABBCCDD',
+      })
+
+      expect(queried.payload.status).toBe(1)
+      expect(queried.payload.money).toBe('0.01')
     } finally {
       global.fetch = originalFetch
       Object.entries(originalEnv).forEach(([key, value]) => {

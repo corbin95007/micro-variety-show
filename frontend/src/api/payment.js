@@ -10,14 +10,19 @@ async function getAuthHeaders(includeJson = false) {
   }
 }
 
-export async function createPayment(provider = 'alipay', productCode = 'report_unlock') {
+export async function createPayment(provider, productCode = 'report_unlock') {
+  const payload = {
+    product_code: productCode,
+  }
+
+  if (provider) {
+    payload.provider = provider
+  }
+
   const res = await fetch('/api/payment/create', {
     method: 'POST',
     headers: await getAuthHeaders(true),
-    body: JSON.stringify({
-      provider,
-      product_code: productCode,
-    }),
+    body: JSON.stringify(payload),
   })
 
   return parseApiResponse(res, {

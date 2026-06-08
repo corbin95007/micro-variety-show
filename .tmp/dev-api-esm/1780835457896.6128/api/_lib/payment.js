@@ -1,15 +1,10 @@
-import { createHash, createSign, createVerify, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createSign, createVerify, randomBytes } from 'node:crypto'
 import { supabase } from './supabase.js'
 import { setReportUnlocked } from './unlock.js'
 
 export const PAYMENT_PROVIDER = Object.freeze({
   ALIPAY: 'alipay',
-  PAYQIXIANG: 'payqixiang',
 })
-
-const DEFAULT_PAYMENT_PROVIDER = PAYMENT_PROVIDER.ALIPAY
-const DEFAULT_QIXIANG_API_URL = 'https://api.payqixiang.cn/mapi.php'
-const DEFAULT_QIXIANG_QUERY_URL = 'https://api.payqixiang.cn/api.php'
 
 export const PAYMENT_STATUS = Object.freeze({
   PENDING: 'pending',
@@ -134,18 +129,6 @@ function getRequestOrigin(req) {
   return `${forwardedProto || 'https'}://${host}`
 }
 
-function getRequestClientIp(req) {
-  const forwardedFor = getHeaderValue(req.headers, 'x-forwarded-for')
-  const firstForwardedIp = String(forwardedFor || '').split(',')[0]?.trim()
-
-  return (
-    firstForwardedIp ||
-    getHeaderValue(req.headers, 'x-real-ip') ||
-    req.socket?.remoteAddress ||
-    '127.0.0.1'
-  )
-}
-
 function getShanghaiDateParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
@@ -169,39 +152,11 @@ function getShanghaiDateParts(date = new Date()) {
 export function normalizePaymentProvider(provider = PAYMENT_PROVIDER.ALIPAY) {
   const normalizedProvider = String(provider || PAYMENT_PROVIDER.ALIPAY).trim().toLowerCase()
 
-  if (!Object.values(PAYMENT_PROVIDER).includes(normalizedProvider)) {
-    throw new Error('当前不支持该支付方式')
+  if (normalizedProvider !== PAYMENT_PROVIDER.ALIPAY) {
+    throw new Error('当前仅支持支付宝支付')
   }
 
   return normalizedProvider
-}
-
-export function getActivePaymentProvider() {
-  const configuredProvider = firstNonEmpty(process.env.PAYMENT_ACTIVE_PROVIDER)
-  if (!configuredProvider) return DEFAULT_PAYMENT_PROVIDER
-
-  return normalizePaymentProvider(configuredProvider)
-}
-
-export function resolvePaymentProviderForCreate(requestedProvider = PAYMENT_PROVIDER.ALIPAY) {
-  const configuredProvider = firstNonEmpty(process.env.PAYMENT_ACTIVE_PROVIDER)
-  return normalizePaymentProvider(configuredProvider || requestedProvider || DEFAULT_PAYMENT_PROVIDER)
-}
-
-function resolvePaymentAmountFen(product) {
-  const configuredAmount = firstNonEmpty(process.env.PAYMENT_TEST_AMOUNT_CENTS)
-  if (!configuredAmount) return product.amountFen
-
-  if (!/^\d+$/.test(configuredAmount)) {
-    throw new Error('PAYMENT_TEST_AMOUNT_CENTS 必须是正整数分单位')
-  }
-
-  const amountFen = Number(configuredAmount)
-  if (!Number.isSafeInteger(amountFen) || amountFen <= 0) {
-    throw new Error('PAYMENT_TEST_AMOUNT_CENTS 必须是正整数分单位')
-  }
-
-  return amountFen
 }
 
 export function getPaymentProduct(productCode = 'report_unlock') {
@@ -212,10 +167,7 @@ export function getPaymentProduct(productCode = 'report_unlock') {
     throw new Error('无效商品')
   }
 
-  return {
-    ...product,
-    amountFen: resolvePaymentAmountFen(product),
-  }
+  return product
 }
 
 export function formatAmountFenToYuan(amountFen) {
@@ -252,28 +204,6 @@ export function resolveSiteBaseUrl(req) {
   return stripTrailingSlash(firstNonEmpty(process.env.APP_BASE_URL, getRequestOrigin(req)))
 }
 
-function appendPathToBaseUrl(baseUrl, pathname) {
-  const configuredBaseUrl = stripTrailingSlash(baseUrl)
-  if (!configuredBaseUrl) return ''
-
-  try {
-    const parsedUrl = new URL(configuredBaseUrl)
-    const normalizedPathname = stripTrailingSlash(parsedUrl.pathname || '')
-
-    if (normalizedPathname.endsWith(pathname)) {
-      return `${parsedUrl.origin}${normalizedPathname}`
-    }
-
-    return `${parsedUrl.origin}${pathname}`
-  } catch {
-    if (configuredBaseUrl.endsWith(pathname)) {
-      return configuredBaseUrl
-    }
-
-    return `${configuredBaseUrl}${pathname}`
-  }
-}
-
 export function resolveNotifyUrl(req) {
   const explicitNotifyUrl = stripTrailingSlash(firstNonEmpty(process.env.ALIPAY_NOTIFY_URL))
   if (explicitNotifyUrl) return explicitNotifyUrl
@@ -284,14 +214,22 @@ export function resolveNotifyUrl(req) {
 
   if (!configuredBaseUrl) return ''
 
-  return appendPathToBaseUrl(configuredBaseUrl, '/api/payment/notify/alipay')
-}
+  try {
+    const parsedUrl = new URL(configuredBaseUrl)
+    const normalizedPathname = stripTrailingSlash(parsedUrl.pathname || '')
 
-export function resolveQixiangNotifyUrl(req) {
-  const explicitNotifyUrl = stripTrailingSlash(firstNonEmpty(process.env.QIXIANG_NOTIFY_URL))
-  if (explicitNotifyUrl) return explicitNotifyUrl
+    if (normalizedPathname.endsWith('/api/payment/notify/alipay')) {
+      return `${parsedUrl.origin}${normalizedPathname}`
+    }
 
-  return appendPathToBaseUrl(resolveSiteBaseUrl(req), '/api/payment/notify/payqixiang')
+    return `${parsedUrl.origin}/api/payment/notify/alipay`
+  } catch {
+    if (configuredBaseUrl.endsWith('/api/payment/notify/alipay')) {
+      return configuredBaseUrl
+    }
+
+    return `${configuredBaseUrl}/api/payment/notify/alipay`
+  }
 }
 
 export function getAlipayConfig(req) {
@@ -337,38 +275,12 @@ export function getAlipayConfig(req) {
   }
 }
 
-export function getQixiangConfig(req) {
-  const pid = firstNonEmpty(process.env.QIXIANG_PID)
-  const key = firstNonEmpty(process.env.QIXIANG_KEY)
-  const apiUrl = firstNonEmpty(process.env.QIXIANG_API_URL) || DEFAULT_QIXIANG_API_URL
-  const queryUrl = firstNonEmpty(process.env.QIXIANG_QUERY_URL) || DEFAULT_QIXIANG_QUERY_URL
-  const siteBaseUrl = resolveSiteBaseUrl(req)
-  const notifyUrl = resolveQixiangNotifyUrl(req)
-
-  if (!pid) throw new Error('Missing environment variable: QIXIANG_PID')
-  if (!key) throw new Error('Missing environment variable: QIXIANG_KEY')
-  if (!siteBaseUrl) throw new Error('Missing environment variable: APP_BASE_URL')
-  if (!notifyUrl) throw new Error('Missing Qixiang notify URL')
-
-  return {
-    pid,
-    key,
-    apiUrl,
-    queryUrl,
-    siteBaseUrl,
-    notifyUrl,
-    signType: 'MD5',
-    payType: 'alipay',
-    device: 'jump',
-  }
-}
-
 export function generateProviderOrderNo(provider = PAYMENT_PROVIDER.ALIPAY) {
   const normalizedProvider = normalizePaymentProvider(provider)
   const timestamp = formatAlipayTimestamp(new Date()).replace(/\D/g, '')
 
   const suffix = randomBytes(4).toString('hex').toUpperCase()
-  const prefix = normalizedProvider === PAYMENT_PROVIDER.ALIPAY ? 'ALI' : 'QX'
+  const prefix = normalizedProvider === PAYMENT_PROVIDER.ALIPAY ? 'ALI' : 'PAY'
   return `${prefix}${timestamp}${suffix}`
 }
 
@@ -455,38 +367,6 @@ export function verifyAlipayResponseSignature(rawText, responseNodeName, sign, p
   return verifier.verify(publicKey, sign, 'base64')
 }
 
-export function serializeQixiangParamsForSigning(params) {
-  return Object.keys(params || {})
-    .filter((key) => {
-      if (key === 'sign' || key === 'sign_type') return false
-
-      const value = params[key]
-      return value !== undefined && value !== null && value !== ''
-    })
-    .sort()
-    .map((key) => `${key}=${params[key]}`)
-    .join('&')
-}
-
-export function signQixiangParams(params, key) {
-  return createHash('md5')
-    .update(`${serializeQixiangParamsForSigning(params)}${key}`, 'utf8')
-    .digest('hex')
-    .toLowerCase()
-}
-
-export function verifyQixiangSignature(params, key) {
-  const actualSign = String(params?.sign || '').trim().toLowerCase()
-  if (!actualSign || !/^[a-f0-9]{32}$/i.test(actualSign)) return false
-
-  const expectedSign = signQixiangParams(params, key)
-  const actualBuffer = Buffer.from(actualSign, 'utf8')
-  const expectedBuffer = Buffer.from(expectedSign, 'utf8')
-
-  if (actualBuffer.length !== expectedBuffer.length) return false
-  return timingSafeEqual(actualBuffer, expectedBuffer)
-}
-
 export function buildAlipayWapPayForm({ req, paymentId, providerOrderNo, product }) {
   const alipayConfig = getAlipayConfig(req)
   const returnUrl = `${alipayConfig.siteBaseUrl}/user?payment_id=${paymentId}&provider=${PAYMENT_PROVIDER.ALIPAY}`
@@ -538,79 +418,6 @@ export function buildAlipayWapPayForm({ req, paymentId, providerOrderNo, product
     fields: {
       biz_content: fields.biz_content,
     },
-  }
-}
-
-export function buildQixiangOrderParams({ req, paymentId, providerOrderNo, product }) {
-  const qixiangConfig = getQixiangConfig(req)
-  const returnUrl = `${qixiangConfig.siteBaseUrl}/user?payment_id=${paymentId}&provider=${PAYMENT_PROVIDER.PAYQIXIANG}`
-  const params = {
-    pid: qixiangConfig.pid,
-    type: qixiangConfig.payType,
-    out_trade_no: providerOrderNo,
-    notify_url: qixiangConfig.notifyUrl,
-    return_url: returnUrl,
-    name: product.subject,
-    money: formatAmountFenToYuan(product.amountFen),
-    clientip: getRequestClientIp(req),
-    device: qixiangConfig.device,
-  }
-
-  return {
-    qixiangConfig,
-    params: {
-      ...params,
-      sign: signQixiangParams(params, qixiangConfig.key),
-      sign_type: qixiangConfig.signType,
-    },
-  }
-}
-
-function parseJsonResponse(rawText, fallbackMessage) {
-  try {
-    return JSON.parse(rawText)
-  } catch {
-    throw new Error(fallbackMessage)
-  }
-}
-
-export async function createQixiangOrder({ req, payment, product }) {
-  const { qixiangConfig, params } = buildQixiangOrderParams({
-    req,
-    paymentId: payment.id,
-    providerOrderNo: payment.provider_order_no,
-    product,
-  })
-
-  const response = await fetch(qixiangConfig.apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8',
-    },
-    body: new URLSearchParams(params),
-  })
-  const rawText = await response.text()
-
-  if (!response.ok) {
-    throw new Error(`七相统一下单请求失败: HTTP ${response.status}`)
-  }
-
-  const payload = parseJsonResponse(rawText, '七相统一下单返回了非 JSON 响应')
-  const payurl = firstNonEmpty(payload?.payurl, payload?.pay_url, payload?.url)
-  const code = payload?.code == null ? '1' : String(payload.code)
-
-  if (code !== '1') {
-    throw new Error(payload?.msg || payload?.message || '七相统一下单失败')
-  }
-
-  if (!payurl) {
-    throw new Error('七相统一下单返回缺少 payurl')
-  }
-
-  return {
-    checkoutUrl: payurl,
-    providerTradeNo: firstNonEmpty(payload?.trade_no),
-    payload,
   }
 }
 
@@ -699,139 +506,11 @@ export async function queryAlipayTrade({ req, providerOrderNo, providerTradeNo }
   }
 }
 
-export async function queryQixiangTrade({ req, providerOrderNo }) {
-  if (!providerOrderNo) {
-    throw new Error('缺少七相查询单号')
-  }
-
-  const qixiangConfig = getQixiangConfig(req)
-  const url = new URL(qixiangConfig.queryUrl)
-  url.searchParams.set('act', 'order')
-  url.searchParams.set('pid', qixiangConfig.pid)
-  url.searchParams.set('key', qixiangConfig.key)
-  url.searchParams.set('out_trade_no', providerOrderNo)
-
-  const response = await fetch(url, {
-    method: 'GET',
-  })
-  const rawText = await response.text()
-
-  if (!response.ok) {
-    throw new Error(`七相查单请求失败: HTTP ${response.status}`)
-  }
-
-  return {
-    qixiangConfig,
-    payload: parseJsonResponse(rawText, '七相查单返回了非 JSON 响应'),
-  }
-}
-
-function getQixiangPayloadValue(payload, ...keys) {
-  for (const key of keys) {
-    const value = payload?.[key]
-    if (value !== undefined && value !== null && value !== '') return String(value)
-  }
-
-  return ''
-}
-
-function isQixiangQuerySuccess(payload) {
-  return getQixiangPayloadValue(payload, 'status') === '1'
-}
-
-function validateQixiangPaymentPayload({ payment, qixiangConfig, payload, notifyPayload = null }) {
-  const mergedPayload = {
-    ...(notifyPayload || {}),
-    ...(payload || {}),
-  }
-  const outTradeNo = getQixiangPayloadValue(payload, 'out_trade_no')
-  if (outTradeNo && outTradeNo !== payment.provider_order_no) {
-    throw new Error('七相订单号与本地支付单不一致')
-  }
-
-  const pid = getQixiangPayloadValue(mergedPayload, 'pid')
-  if (pid && pid !== qixiangConfig.pid) {
-    throw new Error('七相商户 PID 与本地配置不一致')
-  }
-
-  const type = getQixiangPayloadValue(mergedPayload, 'type').toLowerCase()
-  if (type && type !== qixiangConfig.payType) {
-    throw new Error('七相支付渠道与本地配置不一致')
-  }
-
-  const amount = getQixiangPayloadValue(payload, 'money', 'total_amount') ||
-    getQixiangPayloadValue(notifyPayload, 'money', 'total_amount')
-  const amountFen = parseAmountToFen(amount)
-  if (!Number.isFinite(amountFen) || amountFen !== payment.amount) {
-    throw new Error('七相订单金额与本地支付单不一致')
-  }
-
-  const tradeNo = getQixiangPayloadValue(payload, 'trade_no')
-  if (payment.provider_trade_no && tradeNo && payment.provider_trade_no !== tradeNo) {
-    throw new Error('七相交易号与本地支付单不一致')
-  }
-
-  return {
-    provider_trade_no: tradeNo || payment.provider_trade_no,
-    buyer_id: getQixiangPayloadValue(payload, 'buyer_id', 'buyer') || payment.buyer_id,
-    buyer_logon_id: getQixiangPayloadValue(payload, 'buyer_logon_id') || payment.buyer_logon_id,
-  }
-}
-
-function parseQixiangTime(value) {
-  return parseAlipayTime(value)
-}
-
-export async function reconcileQixiangPaymentStatus({ req, payment, notifyPayload = null, requireSuccess = false }) {
-  const { qixiangConfig, payload } = await queryQixiangTrade({
-    req,
-    providerOrderNo: payment.provider_order_no,
-  })
-
-  if (!isQixiangQuerySuccess(payload)) {
-    if (requireSuccess) {
-      throw new Error('七相查单未确认支付成功')
-    }
-
-    return payment
-  }
-
-  const baseFields = validateQixiangPaymentPayload({
-    payment,
-    qixiangConfig,
-    payload,
-    notifyPayload,
-  })
-
-  const updatedPayment = await transitionPaymentStatus(payment, PAYMENT_STATUS.SUCCESS, {
-    ...baseFields,
-    notify_payload: {
-      source: notifyPayload ? 'payqixiang_notify_with_query' : 'payqixiang_trade_query',
-      notify: notifyPayload,
-      query: payload,
-    },
-    paid_at:
-      payment.paid_at ||
-      parseQixiangTime(getQixiangPayloadValue(payload, 'endtime', 'paid_at', 'addtime')) ||
-      new Date().toISOString(),
-    failure_reason: null,
-  })
-
-  await setReportUnlocked(updatedPayment.user_id, true, 'payment')
-  return updatedPayment
-}
-
 export async function reconcilePaymentStatus({ req, payment }) {
-  if (!payment) return payment
+  if (!payment || payment.provider !== PAYMENT_PROVIDER.ALIPAY) return payment
   if (payment.status === PAYMENT_STATUS.SUCCESS || payment.status === PAYMENT_STATUS.REFUNDED) {
     return payment
   }
-
-  if (payment.provider === PAYMENT_PROVIDER.PAYQIXIANG) {
-    return reconcileQixiangPaymentStatus({ req, payment })
-  }
-
-  if (payment.provider !== PAYMENT_PROVIDER.ALIPAY) return payment
 
   const { payload, raw, responseSignatureValid } = await queryAlipayTrade({
     req,
@@ -1041,17 +720,6 @@ export async function getPaymentByProviderOrderNo(provider, providerOrderNo) {
   return data
 }
 
-export async function getPaymentById(paymentId) {
-  const { data, error } = await supabase
-    .from('payments')
-    .select(PAYMENT_SELECT_COLUMNS)
-    .eq('id', paymentId)
-    .maybeSingle()
-
-  if (error) throw error
-  return data
-}
-
 export async function updatePaymentRecord(paymentId, fields) {
   const { data, error } = await supabase
     .from('payments')
@@ -1068,29 +736,6 @@ export async function updatePaymentRecord(paymentId, fields) {
 }
 
 export async function transitionPaymentStatus(payment, nextStatus, fields = {}) {
-  if (nextStatus === PAYMENT_STATUS.SUCCESS || nextStatus === PAYMENT_STATUS.FAILED) {
-    if (payment.status === PAYMENT_STATUS.SUCCESS || payment.status === PAYMENT_STATUS.REFUNDED) {
-      return payment
-    }
-
-    const { data, error } = await supabase
-      .from('payments')
-      .update({
-        ...fields,
-        status: nextStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', payment.id)
-      .eq('status', PAYMENT_STATUS.PENDING)
-      .select(PAYMENT_SELECT_COLUMNS)
-      .maybeSingle()
-
-    if (error) throw error
-    if (data) return data
-
-    return (await getPaymentById(payment.id)) || payment
-  }
-
   return updatePaymentRecord(payment.id, {
     ...fields,
     status: nextStatus,
