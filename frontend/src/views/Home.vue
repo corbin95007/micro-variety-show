@@ -45,23 +45,16 @@
       </button>
     </div>
 
-    <div class="official-section">
+    <div class="official-section" aria-label="官方账号入口">
       <button
+        v-for="entry in officialEntries"
+        :key="entry.key"
         type="button"
         class="official-link-btn"
-        @click="openOfficialLink(OFFICIAL_LINKS.xiaohongshu)"
+        :aria-disabled="!entry.url"
+        @click="openOfficialLink(entry.url)"
       >
-        <span>{{ HOME_TEXT.xiaohongshuOfficial }}</span>
-        <svg class="official-link-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="9 18 15 12 9 6"/>
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="official-link-btn"
-        @click="openOfficialLink(OFFICIAL_LINKS.douyin)"
-      >
-        <span>{{ HOME_TEXT.douyinOfficial }}</span>
+        <span class="official-link-title">{{ entry.label }}</span>
         <svg class="official-link-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="9 18 15 12 9 6"/>
         </svg>
@@ -75,6 +68,19 @@ import { showToast } from 'vant'
 import { SITE, HOME as HOME_TEXT, OFFICIAL_LINKS, TOAST } from '../constants'
 
 const bannerImages = ['/banner1.jpg', '/banner2.jpg', '/banner3.jpg']
+
+const officialEntries = [
+  {
+    key: 'xiaohongshu',
+    label: HOME_TEXT.xiaohongshuOfficial,
+    url: OFFICIAL_LINKS.xiaohongshu,
+  },
+  {
+    key: 'douyin',
+    label: HOME_TEXT.douyinOfficial,
+    url: OFFICIAL_LINKS.douyin,
+  },
+]
 
 function openOfficialLink(url) {
   const officialUrl = String(url || '').trim()
@@ -206,43 +212,61 @@ function openOfficialLink(url) {
 .entry-arrow { color: var(--color-ink-muted); }
 
 .official-section {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  padding: 0 20px 24px;
+  position: relative;
+  left: 50%;
+  width: 100vw;
+  margin-left: -50vw;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0 max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px));
 }
 
 .official-link-btn {
+  max-width: min(220px, calc(100vw - 32px));
   min-width: 0;
-  min-height: 48px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 12px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  color: var(--color-primary);
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-ink-light);
   font-size: 14px;
-  font-weight: 600;
   font-family: var(--font-body);
+  text-align: right;
   cursor: pointer;
-  box-shadow: var(--shadow-card);
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.official-link-btn:hover {
+  color: var(--color-primary);
 }
 
 .official-link-btn:active {
-  transform: scale(0.98);
-  border-color: var(--color-primary);
+  transform: translateX(2px);
+  color: var(--color-primary);
 }
 
-.official-link-btn span {
+.official-link-btn:focus-visible {
+  outline: 0;
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.official-link-title {
+  min-width: 0;
+  font-weight: 600;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .official-link-arrow {
   flex-shrink: 0;
-  color: var(--color-ink-muted);
+  color: currentColor;
 }
 </style>
