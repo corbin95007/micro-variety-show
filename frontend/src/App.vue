@@ -60,6 +60,9 @@ const showBottomNav = computed(() => !auth.loading && !route.meta.hideBottomNav)
   --shadow-card: 0 1px 3px rgba(45, 38, 64, 0.06), 0 4px 12px rgba(45, 38, 64, 0.04);
   --shadow-elevated: 0 4px 16px rgba(45, 38, 64, 0.1), 0 12px 40px rgba(45, 38, 64, 0.06);
 
+  --bottom-nav-height: 64px;
+  --home-page-pad: 20px;
+  --home-card-pad: 20px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 

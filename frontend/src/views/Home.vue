@@ -55,7 +55,7 @@
         @click="openOfficialLink(entry.url)"
       >
         <span class="official-link-title">{{ entry.label }}</span>
-        <svg class="official-link-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg class="official-link-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </button>
@@ -94,9 +94,17 @@ function openOfficialLink(url) {
 </script>
 
 <style scoped>
+.home {
+  --home-card-border: 1px;
+
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - var(--bottom-nav-height) - var(--safe-bottom));
+}
+
 .home-header {
   position: relative;
-  padding: 16px 20px;
+  padding: 16px var(--home-page-pad);
   background: var(--color-primary);
   overflow: hidden;
   display: flex;
@@ -128,7 +136,7 @@ function openOfficialLink(url) {
 }
 
 .swipe-section {
-  padding: 16px 20px 0;
+  padding: 16px var(--home-page-pad) 0;
 }
 
 .home-swipe { border-radius: var(--radius-lg); overflow: hidden; }
@@ -141,16 +149,16 @@ function openOfficialLink(url) {
   background: var(--color-primary-soft);
 }
 
-.entry-section { padding: 20px; }
+.entry-section { padding: var(--home-page-pad); }
 
 .entry-card {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 20px;
+  padding: var(--home-card-pad);
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: var(--home-card-border) solid var(--color-border);
   border-radius: var(--radius-md);
   margin-bottom: 12px;
   cursor: pointer;
@@ -212,15 +220,12 @@ function openOfficialLink(url) {
 .entry-arrow { color: var(--color-ink-muted); }
 
 .official-section {
-  position: relative;
-  left: 50%;
-  width: 100vw;
-  margin-left: -50vw;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  padding: 0 max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px));
+  margin-top: auto;
+  padding: 0 calc(var(--home-page-pad) + var(--home-card-pad) + var(--home-card-border)) 24px var(--home-page-pad);
 }
 
 .official-link-btn {
@@ -247,7 +252,6 @@ function openOfficialLink(url) {
 }
 
 .official-link-btn:active {
-  transform: translateX(2px);
   color: var(--color-primary);
 }
 
@@ -266,6 +270,8 @@ function openOfficialLink(url) {
 }
 
 .official-link-arrow {
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
   color: currentColor;
 }

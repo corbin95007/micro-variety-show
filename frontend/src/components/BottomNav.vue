@@ -42,7 +42,7 @@ function goUser() {
 
 <style scoped>
 .bottom-nav-spacer {
-  height: calc(64px + var(--safe-bottom));
+  height: calc(var(--bottom-nav-height) + var(--safe-bottom));
 }
 
 .bottom-nav {
@@ -54,6 +54,7 @@ function goUser() {
   max-width: 430px;
   display: flex;
   align-items: center;
+  height: calc(var(--bottom-nav-height) + var(--safe-bottom));
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -64,11 +65,13 @@ function goUser() {
 
 .nav-item {
   flex: 1;
+  height: var(--bottom-nav-height);
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 10px 0;
+  padding: 0;
   background: none;
   border: none;
   color: var(--color-ink-light);
