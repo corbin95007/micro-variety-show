@@ -4,6 +4,9 @@ import { parseApiResponse } from '../utils/http'
 const RESULT_LIST_AUTH_ERROR = '登录状态已失效，请重新登录'
 const RESULT_LIST_LOAD_ERROR = '测试结果列表加载失败，请稍后再试'
 const RESULT_LIST_NOT_FOUND_ERROR = '测试结果接口暂不可用，请稍后重试'
+const RESULT_AUTH_ERROR = '登录状态已失效，请重新登录'
+const RESULT_LOAD_ERROR = '结果加载失败，请稍后再试'
+const RESULT_NOT_FOUND_ERROR = '未找到这份测试结果'
 
 export async function getQuestions() {
   const res = await fetch('/api/test/questions')
@@ -27,16 +30,21 @@ export async function submitTest(answers) {
 }
 
 export async function getResult(id) {
-  const { data: { session } } = await supabase.auth.getSession()
-  const res = await fetch(`/api/test/result/${id}`, {
+  const { data: { session }, error } = await supabase.auth.getSession()
+  if (error) throw error
+
+  const token = session?.access_token
+  if (!token) throw new Error(RESULT_AUTH_ERROR)
+
+  const res = await fetch(`/api/test/result?id=${encodeURIComponent(id)}`, {
     headers: {
-      'Authorization': `Bearer ${session?.access_token}`
+      'Authorization': `Bearer ${token}`
     }
   })
   return parseApiResponse(res, {
-    fallbackMessage: '结果加载失败，请稍后再试',
-    unauthorizedMessage: '登录状态已失效，请重新登录',
-    notFoundMessage: '未找到这份测试结果',
+    fallbackMessage: RESULT_LOAD_ERROR,
+    unauthorizedMessage: RESULT_AUTH_ERROR,
+    notFoundMessage: RESULT_NOT_FOUND_ERROR,
   })
 }
 

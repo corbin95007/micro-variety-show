@@ -46,6 +46,43 @@ describe('test catch-all API route', () => {
     })
   })
 
+  it('maps /api/test/result?id=:id to the legacy result handler', () => {
+    const route = resolveTestRoute({
+      url: '/api/test/result?id=8',
+      query: {
+        id: '8',
+      },
+    })
+
+    expect(route?.handler).toBe(resultHandler)
+    expect(route?.query).toEqual({
+      id: '8',
+      path: ['result'],
+    })
+  })
+
+  it('keeps /api/test/result/:id path ids compatible when query id also exists', () => {
+    const route = resolveTestRoute({
+      url: '/api/test/result/8?id=7',
+      query: {
+        id: '7',
+      },
+    })
+
+    expect(route?.handler).toBe(resultHandler)
+    expect(route?.query).toEqual({
+      id: '8',
+      path: ['result', '8'],
+    })
+  })
+
+  it('does not route /api/test/result without an id', () => {
+    expect(resolveTestRoute({
+      url: '/api/test/result',
+      query: {},
+    })).toBeNull()
+  })
+
   it('falls back to req.url when Vercel does not inject query.path', () => {
     const route = resolveTestRoute({
       url: '/api/test/results?cursor=next',

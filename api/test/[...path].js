@@ -27,6 +27,12 @@ function normalizePath(value) {
   return []
 }
 
+function normalizeQueryId(value) {
+  if (Array.isArray(value)) return normalizeQueryId(value[0])
+  if (value === undefined || value === null) return ''
+  return String(value)
+}
+
 function parsePathnameFromUrl(value) {
   if (typeof value !== 'string' || !value) return ''
 
@@ -62,12 +68,15 @@ function resolveRouteForPath(path, query) {
 
   if (rest.length > 0) return null
 
-  if (name === 'result' && id) {
+  if (name === 'result') {
+    const resultId = id || normalizeQueryId(query?.id)
+    if (!resultId) return null
+
     return {
       handler: resultHandler,
       query: {
         ...query,
-        id,
+        id: resultId,
       },
     }
   }

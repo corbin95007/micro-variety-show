@@ -123,8 +123,8 @@ import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useUnlockStore } from '../stores/unlock'
-import { supabase } from '../utils/supabase'
-import { formatRequestError, parseApiResponse } from '../utils/http'
+import { getResult } from '../api/test'
+import { formatRequestError } from '../utils/http'
 import SpectrumBar from '../components/SpectrumBar.vue'
 import { RESULT as R, RESULT_TAG_MEANINGS } from '../constants'
 
@@ -176,24 +176,7 @@ async function loadResult() {
   unlock.hydrate(auth.user.id)
 
   try {
-    const { data, error } = await supabase.auth.getSession()
-    if (error) throw error
-
-    const token = data.session?.access_token
-    if (!token) {
-      errorAction.value = 'login'
-      throw new Error('登录状态已失效，请重新登录')
-    }
-
-    const resp = await fetch(`/api/test/result/${route.params.id}`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    })
-
-    result.value = await parseApiResponse(resp, {
-      fallbackMessage: '结果加载失败，请稍后再试',
-      unauthorizedMessage: '登录状态已失效，请重新登录',
-      notFoundMessage: '未找到这份测试结果',
-    })
+    result.value = await getResult(route.params.id)
     activeTag.value = result.value?.tags?.[0] || ''
 
     // 解锁是账号级全局结论，把权威的 is_unlocked 回写 store 作为单一真相源
