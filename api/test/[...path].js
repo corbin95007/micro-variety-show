@@ -11,14 +11,53 @@ const ROUTES = {
   submit: submitHandler,
 }
 
+const TEST_API_PREFIX = '/api/test'
+
+function decodePathSegment(segment) {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
 function normalizePath(value) {
-  if (Array.isArray(value)) return value
-  if (typeof value === 'string') return value.split('/').filter(Boolean)
+  if (Array.isArray(value)) return value.map((segment) => decodePathSegment(String(segment))).filter(Boolean)
+  if (typeof value === 'string') return value.split('/').filter(Boolean).map(decodePathSegment)
   return []
 }
 
-export function resolveTestRoute(req) {
-  const path = normalizePath(req.query?.path)
+function parsePathnameFromUrl(value) {
+  if (typeof value !== 'string' || !value) return ''
+
+  try {
+    return new URL(value, 'https://grandwitch.local').pathname
+  } catch {
+    return value.split('?')[0].split('#')[0]
+  }
+}
+
+function normalizePathFromUrl(req) {
+  const candidates = [
+    req.url,
+    req.originalUrl,
+    req._parsedUrl?.pathname,
+    req.path,
+  ]
+
+  for (const candidate of candidates) {
+    const pathname = parsePathnameFromUrl(candidate)
+
+    if (pathname === TEST_API_PREFIX) return []
+    if (!pathname.startsWith(`${TEST_API_PREFIX}/`)) continue
+
+    return normalizePath(pathname.slice(TEST_API_PREFIX.length + 1))
+  }
+
+  return []
+}
+
+function resolveRouteForPath(path, query) {
   const [name, id, ...rest] = path
 
   if (rest.length > 0) return null
@@ -27,7 +66,7 @@ export function resolveTestRoute(req) {
     return {
       handler: resultHandler,
       query: {
-        ...req.query,
+        ...query,
         id,
       },
     }
@@ -36,11 +75,22 @@ export function resolveTestRoute(req) {
   if (path.length === 1 && ROUTES[name]) {
     return {
       handler: ROUTES[name],
-      query: req.query,
+      query,
     }
   }
 
   return null
+}
+
+export function resolveTestRoute(req) {
+  const queryPath = normalizePath(req.query?.path)
+  if (queryPath.length > 0) return resolveRouteForPath(queryPath, req.query)
+
+  const urlPath = normalizePathFromUrl(req)
+  return resolveRouteForPath(urlPath, {
+    ...req.query,
+    path: urlPath,
+  })
 }
 
 export default async function handler(req, res) {

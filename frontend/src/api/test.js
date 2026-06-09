@@ -1,6 +1,10 @@
 import { supabase } from '../utils/supabase'
 import { parseApiResponse } from '../utils/http'
 
+const RESULT_LIST_AUTH_ERROR = '登录状态已失效，请重新登录'
+const RESULT_LIST_LOAD_ERROR = '测试结果列表加载失败，请稍后再试'
+const RESULT_LIST_NOT_FOUND_ERROR = '测试结果接口暂不可用，请稍后重试'
+
 export async function getQuestions() {
   const res = await fetch('/api/test/questions')
   return parseApiResponse(res, { fallbackMessage: '题目加载失败，请稍后再试' })
@@ -37,14 +41,20 @@ export async function getResult(id) {
 }
 
 export async function getResults() {
-  const { data: { session } } = await supabase.auth.getSession()
+  const { data: { session }, error } = await supabase.auth.getSession()
+  if (error) throw error
+
+  const token = session?.access_token
+  if (!token) throw new Error(RESULT_LIST_AUTH_ERROR)
+
   const res = await fetch('/api/test/results', {
     headers: {
-      'Authorization': `Bearer ${session?.access_token}`
+      'Authorization': `Bearer ${token}`
     }
   })
   return parseApiResponse(res, {
-    fallbackMessage: '测试结果列表加载失败，请稍后再试',
-    unauthorizedMessage: '登录状态已失效，请重新登录',
+    fallbackMessage: RESULT_LIST_LOAD_ERROR,
+    unauthorizedMessage: RESULT_LIST_AUTH_ERROR,
+    notFoundMessage: RESULT_LIST_NOT_FOUND_ERROR,
   })
 }

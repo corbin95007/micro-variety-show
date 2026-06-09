@@ -67,8 +67,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useUnlockStore } from '../stores/unlock'
-import { supabase } from '../utils/supabase'
-import { formatRequestError, parseApiResponse } from '../utils/http'
+import { getResults } from '../api/test'
+import { formatRequestError } from '../utils/http'
 import { RESULT_LIST as RL } from '../constants'
 
 const router = useRouter()
@@ -79,6 +79,10 @@ const loading = ref(true)
 const errorMessage = ref('')
 const errorAction = ref('retry')
 
+const RESULT_LIST_LOAD_ERROR = '测试结果列表加载失败，请稍后再试'
+const RESULT_LIST_AUTH_ERROR = '登录状态已失效，请重新登录'
+const RESULT_LIST_FORMAT_ERROR = '测试结果列表返回格式异常，请稍后再试'
+
 function formatDate(iso) {
   return new Date(iso).toLocaleString('zh-CN', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -87,6 +91,16 @@ function formatDate(iso) {
 
 function goLogin() {
   router.push({ path: '/login', query: { redirect: '/test/results' } })
+}
+
+function normalizeResultsPayload(payload) {
+  if (Array.isArray(payload)) return payload
+
+  if (payload && typeof payload === 'object' && Array.isArray(payload.results)) {
+    return payload.results
+  }
+
+  throw new Error(RESULT_LIST_FORMAT_ERROR)
 }
 
 async function loadResults() {
@@ -100,28 +114,11 @@ async function loadResults() {
     return
   }
 
-  // 缓存优先：先用 store 解锁态瞬显徽章，再用接口返回的权威值纠正并回写
-  unlock.hydrate(auth.user.id)
-
   try {
-    const { data: sessionData, error } = await supabase.auth.getSession()
-    if (error) throw error
+    // 缓存优先：先用 store 解锁态瞬显徽章，再用接口返回的权威值纠正并回写
+    unlock.hydrate(auth.user.id)
 
-    const token = sessionData.session?.access_token
-    if (!token) {
-      errorAction.value = 'login'
-      throw new Error('登录状态已失效，请重新登录')
-    }
-
-    const resp = await fetch('/api/test/results', {
-      headers: { 'Authorization': `Bearer ${token}` },
-    })
-
-    const payload = await parseApiResponse(resp, {
-      fallbackMessage: '测试结果列表加载失败，请稍后再试',
-      unauthorizedMessage: '登录状态已失效，请重新登录',
-    })
-    results.value = Array.isArray(payload) ? payload : []
+    results.value = normalizeResultsPayload(await getResults())
 
     // 解锁是账号级全局结论，所有结果共用同一 is_unlocked，取其一回写 store
     if (results.value.length) {
@@ -132,11 +129,11 @@ async function loadResults() {
       )
     }
   } catch (error) {
-    if (error instanceof Error && error.message === '登录状态已失效，请重新登录') {
+    if (error instanceof Error && error.message === RESULT_LIST_AUTH_ERROR) {
       errorAction.value = 'login'
     }
 
-    errorMessage.value = formatRequestError(error, '测试结果列表加载失败，请稍后再试')
+    errorMessage.value = formatRequestError(error, RESULT_LIST_LOAD_ERROR)
   } finally {
     loading.value = false
   }
