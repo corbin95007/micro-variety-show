@@ -1,18 +1,6 @@
 import { createHash, createSign, createVerify, randomBytes, timingSafeEqual } from 'node:crypto'
-import {
-  buildQixiangQueryRequest,
-  redactPaymentSensitiveText,
-} from './payment-gateway-guard.js'
 import { supabase } from './supabase.js'
 import { setReportUnlocked } from './unlock.js'
-
-export {
-  buildQixiangQueryRequest,
-  getQixiangQueryAllowedHostnames,
-  redactPaymentSensitiveText,
-  resolveQixiangQueryMethod,
-  validateQixiangQueryUrl,
-} from './payment-gateway-guard.js'
 
 export const PAYMENT_PROVIDER = Object.freeze({
   ALIPAY: 'alipay',
@@ -717,12 +705,15 @@ export async function queryQixiangTrade({ req, providerOrderNo }) {
   }
 
   const qixiangConfig = getQixiangConfig(req)
-  const { url, fetchOptions } = buildQixiangQueryRequest({
-    qixiangConfig,
-    providerOrderNo,
-  })
+  const url = new URL(qixiangConfig.queryUrl)
+  url.searchParams.set('act', 'order')
+  url.searchParams.set('pid', qixiangConfig.pid)
+  url.searchParams.set('key', qixiangConfig.key)
+  url.searchParams.set('out_trade_no', providerOrderNo)
 
-  const response = await fetch(url, fetchOptions)
+  const response = await fetch(url, {
+    method: 'GET',
+  })
   const rawText = await response.text()
 
   if (!response.ok) {
@@ -926,7 +917,7 @@ export function getPaymentRuntimeErrorMessage(error, fallbackMessage) {
     return '支付库表还是旧结构。请先在 Supabase SQL Editor 执行 `supabase/migrations/005_expand_payments.sql`，把 payments 表补齐后再发起支付。'
   }
 
-  return redactPaymentSensitiveText(error?.message || fallbackMessage)
+  return error?.message || fallbackMessage
 }
 
 function normalizeFormObject(body) {

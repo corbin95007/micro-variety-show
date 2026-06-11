@@ -52,6 +52,8 @@ export const RESULT = {
   tagsLabel: '特殊标签',
   portraitLabel: '你的画像',
   portraitPlaceholder: '画像分析内容将在后续版本中上线。',
+  creatorNoteTitle: '出题组的话',
+  creatorNoteBody: '这里是出题组预留给用户的话。后续可以在 frontend/src/constants.js 的 RESULT.creatorNoteBody 中替换为正式文案。',
   lockedTitle: '结果尚未解锁',
   lockedDesc: '在用户中心分享邀请链接，或直接购买解锁',
   unlockBtn: '去解锁',

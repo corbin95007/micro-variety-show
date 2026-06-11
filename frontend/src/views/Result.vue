@@ -99,6 +99,10 @@
               <p class="portrait-card-text">{{ block.body }}</p>
             </article>
           </div>
+          <div class="creator-note">
+            <h3 class="creator-note-title">{{ R.creatorNoteTitle }}</h3>
+            <p class="creator-note-body">{{ R.creatorNoteBody }}</p>
+          </div>
         </section>
       </template>
 
@@ -394,6 +398,27 @@ onMounted(loadResult)
 }
 
 .portrait-card-text {
+  color: var(--color-ink-light);
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-line;
+}
+
+.creator-note {
+  margin: 24px 20px 0;
+  padding: 20px 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.creator-note-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.creator-note-body {
   color: var(--color-ink-light);
   font-size: 14px;
   line-height: 1.8;

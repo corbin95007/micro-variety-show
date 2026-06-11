@@ -410,12 +410,14 @@ describe('payment helpers', () => {
     }
   })
 
-  it('queries payqixiang order status without leaking the query url into errors', async () => {
+  it('queries payqixiang order status with POST body key and no key in the URL', async () => {
     const originalEnv = {
       APP_BASE_URL: process.env.APP_BASE_URL,
       QIXIANG_PID: process.env.QIXIANG_PID,
       QIXIANG_KEY: process.env.QIXIANG_KEY,
       QIXIANG_QUERY_URL: process.env.QIXIANG_QUERY_URL,
+      QIXIANG_QUERY_METHOD: process.env.QIXIANG_QUERY_METHOD,
+      QIXIANG_QUERY_HTTP_METHOD: process.env.QIXIANG_QUERY_HTTP_METHOD,
     }
     const originalFetch = global.fetch
 
@@ -424,12 +426,24 @@ describe('payment helpers', () => {
       process.env.QIXIANG_PID = '1001'
       process.env.QIXIANG_KEY = 'test-secret'
       process.env.QIXIANG_QUERY_URL = 'https://api.payqixiang.cn/api.php'
+      delete process.env.QIXIANG_QUERY_METHOD
+      delete process.env.QIXIANG_QUERY_HTTP_METHOD
 
-      global.fetch = vi.fn(async (url) => {
-        expect(String(url)).toContain('act=order')
-        expect(String(url)).toContain('pid=1001')
-        expect(String(url)).toContain('key=test-secret')
-        expect(String(url)).toContain('out_trade_no=QX20260608000000AABBCCDD')
+      global.fetch = vi.fn(async (url, options) => {
+        const queryUrl = new URL(String(url))
+        const body = new URLSearchParams(options.body)
+
+        expect(options.method).toBe('POST')
+        expect(queryUrl.origin).toBe('https://api.payqixiang.cn')
+        expect(queryUrl.pathname).toBe('/api.php')
+        expect(queryUrl.search).toBe('')
+        expect(queryUrl.searchParams.has('key')).toBe(false)
+        expect(String(url)).not.toContain('key=')
+        expect(body.get('act')).toBe('order')
+        expect(body.get('pid')).toBe('1001')
+        expect(body.get('key')).toBe('test-secret')
+        expect(body.get('out_trade_no')).toBe('QX20260608000000AABBCCDD')
+        expect(options.headers['Content-Type']).toContain('application/x-www-form-urlencoded')
 
         return {
           ok: true,
@@ -451,6 +465,7 @@ describe('payment helpers', () => {
         providerOrderNo: 'QX20260608000000AABBCCDD',
       })
 
+      expect(global.fetch).toHaveBeenCalledTimes(1)
       expect(queried.payload.status).toBe(1)
       expect(queried.payload.money).toBe('0.01')
     } finally {
@@ -463,6 +478,149 @@ describe('payment helpers', () => {
 
         process.env[key] = value
       })
+    }
+  })
+
+  it('queries payqixiang order status with GET header key and no key in the URL', async () => {
+    const originalEnv = {
+      APP_BASE_URL: process.env.APP_BASE_URL,
+      QIXIANG_PID: process.env.QIXIANG_PID,
+      QIXIANG_KEY: process.env.QIXIANG_KEY,
+      QIXIANG_QUERY_URL: process.env.QIXIANG_QUERY_URL,
+      QIXIANG_QUERY_METHOD: process.env.QIXIANG_QUERY_METHOD,
+      QIXIANG_QUERY_HTTP_METHOD: process.env.QIXIANG_QUERY_HTTP_METHOD,
+    }
+    const originalFetch = global.fetch
+
+    try {
+      process.env.APP_BASE_URL = 'https://micro-variety-show.vercel.app'
+      process.env.QIXIANG_PID = '1001'
+      process.env.QIXIANG_KEY = 'test-secret'
+      process.env.QIXIANG_QUERY_URL = 'https://api.payqixiang.cn/api.php'
+      process.env.QIXIANG_QUERY_METHOD = 'GET'
+      delete process.env.QIXIANG_QUERY_HTTP_METHOD
+
+      global.fetch = vi.fn(async (url, options) => {
+        const queryUrl = new URL(String(url))
+
+        expect(options.method).toBe('GET')
+        expect(queryUrl.searchParams.get('act')).toBe('order')
+        expect(queryUrl.searchParams.get('pid')).toBe('1001')
+        expect(queryUrl.searchParams.get('out_trade_no')).toBe('QX20260608000000AABBCCDD')
+        expect(queryUrl.searchParams.has('key')).toBe(false)
+        expect(String(url)).not.toContain('key=')
+        expect(options.headers['X-Qixiang-Key']).toBe('test-secret')
+        expect(options.body).toBeUndefined()
+
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            code: 1,
+            status: 1,
+            pid: '1001',
+            type: 'alipay',
+            out_trade_no: 'QX20260608000000AABBCCDD',
+            trade_no: '202606082200000001',
+            money: '0.01',
+          }),
+        }
+      })
+
+      const queried = await queryQixiangTrade({
+        req: { headers: {} },
+        providerOrderNo: 'QX20260608000000AABBCCDD',
+      })
+
+      expect(global.fetch).toHaveBeenCalledTimes(1)
+      expect(queried.payload.status).toBe(1)
+    } finally {
+      global.fetch = originalFetch
+      Object.entries(originalEnv).forEach(([key, value]) => {
+        if (value == null) {
+          delete process.env[key]
+          return
+        }
+
+        process.env[key] = value
+      })
+    }
+  })
+
+  it('rejects payqixiang query URLs that are not HTTPS or not on the hostname allowlist', async () => {
+    const originalEnv = {
+      APP_BASE_URL: process.env.APP_BASE_URL,
+      QIXIANG_PID: process.env.QIXIANG_PID,
+      QIXIANG_KEY: process.env.QIXIANG_KEY,
+      QIXIANG_QUERY_URL: process.env.QIXIANG_QUERY_URL,
+      QIXIANG_QUERY_METHOD: process.env.QIXIANG_QUERY_METHOD,
+      QIXIANG_QUERY_ALLOWED_HOSTS: process.env.QIXIANG_QUERY_ALLOWED_HOSTS,
+      QIXIANG_ALLOWED_QUERY_HOSTS: process.env.QIXIANG_ALLOWED_QUERY_HOSTS,
+    }
+    const originalFetch = global.fetch
+
+    try {
+      process.env.APP_BASE_URL = 'https://micro-variety-show.vercel.app'
+      process.env.QIXIANG_PID = '1001'
+      process.env.QIXIANG_KEY = 'test-secret'
+      delete process.env.QIXIANG_QUERY_METHOD
+      delete process.env.QIXIANG_QUERY_ALLOWED_HOSTS
+      delete process.env.QIXIANG_ALLOWED_QUERY_HOSTS
+
+      global.fetch = vi.fn()
+
+      process.env.QIXIANG_QUERY_URL = 'http://api.payqixiang.cn/api.php'
+      await expect(queryQixiangTrade({
+        req: { headers: {} },
+        providerOrderNo: 'QX20260608000000AABBCCDD',
+      })).rejects.toThrow('https://')
+
+      process.env.QIXIANG_QUERY_URL = 'https://payments.example.com/api.php'
+      await expect(queryQixiangTrade({
+        req: { headers: {} },
+        providerOrderNo: 'QX20260608000000AABBCCDD',
+      })).rejects.toThrow('白名单')
+
+      expect(global.fetch).not.toHaveBeenCalled()
+    } finally {
+      global.fetch = originalFetch
+      Object.entries(originalEnv).forEach(([key, value]) => {
+        if (value == null) {
+          delete process.env[key]
+          return
+        }
+
+        process.env[key] = value
+      })
+    }
+  })
+
+  it('redacts payment runtime error messages before they are returned or logged', () => {
+    const originalKey = process.env.QIXIANG_KEY
+
+    try {
+      process.env.QIXIANG_KEY = 'real-qixiang-secret'
+
+      const message = getPaymentRuntimeErrorMessage(
+        new Error(
+          'request failed: https://api.payqixiang.cn/api.php?act=order&key=real-qixiang-secret&sign=raw-sign&access_token=access-1 token=token-1 secret:secret-1 {"secret":"json-secret"}'
+        ),
+        'fallback'
+      )
+
+      expect(message).toContain('[redacted]')
+      expect(message).not.toContain('real-qixiang-secret')
+      expect(message).not.toContain('raw-sign')
+      expect(message).not.toContain('access-1')
+      expect(message).not.toContain('token-1')
+      expect(message).not.toContain('secret-1')
+      expect(message).not.toContain('json-secret')
+    } finally {
+      if (originalKey == null) {
+        delete process.env.QIXIANG_KEY
+      } else {
+        process.env.QIXIANG_KEY = originalKey
+      }
     }
   })
 
