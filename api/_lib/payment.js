@@ -3,8 +3,9 @@ import {
   buildQixiangQueryRequest,
   redactPaymentSensitiveText,
 } from './payment-gateway-guard.js'
+import { evaluatePaymentTestMode } from './dangerous-env.js'
 import { supabase } from './supabase.js'
-import { setReportUnlocked } from './unlock.js'
+import { buildReportAccessPaymentContext, setReportUnlocked } from './unlock.js'
 
 export {
   buildQixiangQueryRequest,
@@ -201,19 +202,19 @@ export function resolvePaymentProviderForCreate(requestedProvider = PAYMENT_PROV
 }
 
 function resolvePaymentAmountFen(product) {
-  const configuredAmount = firstNonEmpty(process.env.PAYMENT_TEST_AMOUNT_CENTS)
-  if (!configuredAmount) return product.amountFen
+  const paymentTestMode = evaluatePaymentTestMode(process.env)
+  if (!paymentTestMode.configured) return product.amountFen
 
-  if (!/^\d+$/.test(configuredAmount)) {
-    throw new Error('PAYMENT_TEST_AMOUNT_CENTS 必须是正整数分单位')
+  if (!paymentTestMode.allowed) {
+    console.warn('Payment test amount blocked by dangerous env guard:', {
+      reasonCode: paymentTestMode.reasonCode,
+      strict: paymentTestMode.strict,
+      expiresAt: paymentTestMode.expiresAt?.toISOString?.() || null,
+    })
+    throw new Error(`PAYMENT_TEST_AMOUNT_CENTS 当前不可用: ${paymentTestMode.reasonCode}`)
   }
 
-  const amountFen = Number(configuredAmount)
-  if (!Number.isSafeInteger(amountFen) || amountFen <= 0) {
-    throw new Error('PAYMENT_TEST_AMOUNT_CENTS 必须是正整数分单位')
-  }
-
-  return amountFen
+  return paymentTestMode.amountFen
 }
 
 export function getPaymentProduct(productCode = 'report_unlock') {
@@ -961,7 +962,9 @@ export async function reconcileQixiangPaymentStatus({ req, payment, notifyPayloa
     failure_reason: null,
   })
 
-  await setReportUnlocked(updatedPayment.user_id, true, 'payment')
+  await setReportUnlocked(updatedPayment.user_id, true, 'payment', {
+    context: buildReportAccessPaymentContext(updatedPayment),
+  })
   return updatedPayment
 }
 
@@ -1017,7 +1020,9 @@ export async function reconcilePaymentStatus({ req, payment }) {
       failure_reason: null,
     })
 
-    await setReportUnlocked(updatedPayment.user_id, true, 'payment')
+    await setReportUnlocked(updatedPayment.user_id, true, 'payment', {
+      context: buildReportAccessPaymentContext(updatedPayment),
+    })
     return updatedPayment
   }
 

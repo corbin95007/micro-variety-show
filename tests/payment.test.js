@@ -69,6 +69,15 @@ async function loadPaymentModuleWithMocks({ updatedPayment = null } = {}) {
     supabase: persistence.supabase,
   }))
   vi.doMock('../api/_lib/unlock.js', () => ({
+    buildReportAccessPaymentContext: (payment, reason = 'payment_success') => ({
+      reason,
+      payment_id: payment?.id ?? null,
+      provider: payment?.provider ?? null,
+      order_no: payment?.provider_order_no ?? null,
+      amount_fen: Number.isInteger(payment?.amount) ? payment.amount : null,
+      provider_trade_no: payment?.provider_trade_no ?? null,
+      paid_at: payment?.paid_at ?? null,
+    }),
     setReportUnlocked,
   }))
 
@@ -343,21 +352,103 @@ describe('payment helpers', () => {
 
   it('uses server-side test amount cents when configured', () => {
     const originalEnv = {
+      VERCEL_ENV: process.env.VERCEL_ENV,
+      NODE_ENV: process.env.NODE_ENV,
       PAYMENT_TEST_AMOUNT_CENTS: process.env.PAYMENT_TEST_AMOUNT_CENTS,
+      PAYMENT_TEST_MODE_ENABLED: process.env.PAYMENT_TEST_MODE_ENABLED,
+      PAYMENT_TEST_MODE_UNTIL: process.env.PAYMENT_TEST_MODE_UNTIL,
+      PAYMENT_TEST_CONFIRMATION: process.env.PAYMENT_TEST_CONFIRMATION,
     }
 
     try {
+      delete process.env.VERCEL_ENV
+      delete process.env.NODE_ENV
       delete process.env.PAYMENT_TEST_AMOUNT_CENTS
+      delete process.env.PAYMENT_TEST_MODE_ENABLED
+      delete process.env.PAYMENT_TEST_MODE_UNTIL
+      delete process.env.PAYMENT_TEST_CONFIRMATION
       expect(getPaymentProduct('report_unlock').amountFen).toBe(990)
 
       process.env.PAYMENT_TEST_AMOUNT_CENTS = '1'
       expect(getPaymentProduct('report_unlock').amountFen).toBe(1)
     } finally {
-      if (originalEnv.PAYMENT_TEST_AMOUNT_CENTS == null) {
-        delete process.env.PAYMENT_TEST_AMOUNT_CENTS
-      } else {
-        process.env.PAYMENT_TEST_AMOUNT_CENTS = originalEnv.PAYMENT_TEST_AMOUNT_CENTS
-      }
+      Object.entries(originalEnv).forEach(([key, value]) => {
+        if (value == null) {
+          delete process.env[key]
+          return
+        }
+
+        process.env[key] = value
+      })
+    }
+  })
+
+  it('blocks production test amount without the approved confirmation bundle before creating a product', () => {
+    const restoreEnv = withPaymentEnv({
+      VERCEL_ENV: 'production',
+      NODE_ENV: null,
+      PAYMENT_TEST_AMOUNT_CENTS: '1',
+      PAYMENT_TEST_MODE_ENABLED: null,
+      PAYMENT_TEST_MODE_UNTIL: null,
+      PAYMENT_TEST_CONFIRMATION: null,
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      expect(() => getPaymentProduct('report_unlock')).toThrow('payment_test_mode_not_enabled')
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Payment test amount blocked by dangerous env guard:',
+        expect.objectContaining({
+          reasonCode: 'payment_test_mode_not_enabled',
+          strict: true,
+        })
+      )
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('PAYMENT_TEST_CONFIRMATION')
+    } finally {
+      warnSpy.mockRestore()
+      restoreEnv()
+    }
+  })
+
+  it('allows production test amount inside the approved payment test window', () => {
+    const restoreEnv = withPaymentEnv({
+      VERCEL_ENV: 'production',
+      NODE_ENV: null,
+      PAYMENT_TEST_AMOUNT_CENTS: '1',
+      PAYMENT_TEST_MODE_ENABLED: 'true',
+      PAYMENT_TEST_MODE_UNTIL: '2026-06-20T23:59:59+08:00',
+      PAYMENT_TEST_CONFIRMATION: 'confirmed-by-ops',
+    })
+    vi.useFakeTimers()
+
+    try {
+      vi.setSystemTime(new Date('2026-06-12T10:00:00+08:00'))
+      expect(getPaymentProduct('report_unlock').amountFen).toBe(1)
+    } finally {
+      vi.useRealTimers()
+      restoreEnv()
+    }
+  })
+
+  it('blocks production test amount after the approved payment test window', () => {
+    const restoreEnv = withPaymentEnv({
+      VERCEL_ENV: 'production',
+      NODE_ENV: null,
+      PAYMENT_TEST_AMOUNT_CENTS: '1',
+      PAYMENT_TEST_MODE_ENABLED: 'true',
+      PAYMENT_TEST_MODE_UNTIL: '2026-06-20T23:59:59+08:00',
+      PAYMENT_TEST_CONFIRMATION: 'confirmed-by-ops',
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.useFakeTimers()
+
+    try {
+      vi.setSystemTime(new Date('2026-06-21T00:00:00+08:00'))
+      expect(() => getPaymentProduct('report_unlock')).toThrow('payment_test_window_expired')
+    } finally {
+      vi.useRealTimers()
+      warnSpy.mockRestore()
+      restoreEnv()
     }
   })
 
@@ -700,7 +791,20 @@ describe('payment helpers', () => {
         buyer_logon_id: 'sandbox_buyer@example.com',
         failure_reason: null,
       }))
-      expect(scenario.mocks.setReportUnlocked).toHaveBeenCalledWith('user-1', true, 'payment')
+      expect(scenario.mocks.setReportUnlocked).toHaveBeenCalledWith(
+        'user-1',
+        true,
+        'payment',
+        {
+          context: expect.objectContaining({
+            reason: 'payment_success',
+            provider: 'alipay',
+            order_no: 'ALI20260501000000ABCD1234',
+            amount_fen: 990,
+            provider_trade_no: '2026050122001499999999999999',
+          }),
+        }
+      )
     } finally {
       scenario.restore()
     }
@@ -915,7 +1019,20 @@ describe('payment helpers', () => {
         provider_trade_no: '202606082200000001',
         failure_reason: null,
       }))
-      expect(scenario.mocks.setReportUnlocked).toHaveBeenCalledWith('user-1', true, 'payment')
+      expect(scenario.mocks.setReportUnlocked).toHaveBeenCalledWith(
+        'user-1',
+        true,
+        'payment',
+        {
+          context: expect.objectContaining({
+            reason: 'payment_success',
+            provider: 'payqixiang',
+            order_no: 'QX20260608000000AABBCCDD',
+            amount_fen: 1,
+            provider_trade_no: '202606082200000001',
+          }),
+        }
+      )
     } finally {
       scenario.restore()
     }

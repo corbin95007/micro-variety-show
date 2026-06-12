@@ -12,7 +12,7 @@ import {
   verifyAlipaySignature,
 } from '../../_lib/payment.js'
 import { attachRequestId, logApiError } from '../../_lib/errors.js'
-import { setReportUnlocked } from '../../_lib/unlock.js'
+import { buildReportAccessPaymentContext, setReportUnlocked } from '../../_lib/unlock.js'
 
 function sendNotifyText(res, statusCode, text) {
   res.status(statusCode)
@@ -89,7 +89,9 @@ export default async function handler(req, res) {
         failure_reason: null,
       })
 
-      await setReportUnlocked(updatedPayment.user_id, true, 'payment')
+      await setReportUnlocked(updatedPayment.user_id, true, 'payment', {
+        context: buildReportAccessPaymentContext(updatedPayment),
+      })
 
       return sendNotifyText(res, 200, 'success')
     }
