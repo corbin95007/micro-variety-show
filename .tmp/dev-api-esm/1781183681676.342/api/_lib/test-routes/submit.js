@@ -1,7 +1,17 @@
 import { supabase, getUserId } from '../supabase.js'
 import { calculateScores, assignTags } from '../scoring.js'
 import { getUnlockDecision } from '../unlock.js'
-import { attachRequestId, handleApiError, logApiError, sendBadRequest, sendUnauthorized } from '../errors.js'
+
+function formatSupabaseError(stage, error) {
+  return {
+    error: error?.message ?? 'Unknown Supabase error',
+    stage,
+    message: error?.message ?? null,
+    code: error?.code ?? null,
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+  }
+}
 
 function buildSubmitLogSummary({ userId, questions, answers, scores, tags, unlockDecision }) {
   return {
@@ -30,16 +40,12 @@ export function buildSubmitResponse(result, unlockDecision) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const requestId = attachRequestId(req, res)
   const userId = await getUserId(req)
-  if (!userId) return sendUnauthorized(res, { requestId })
+  if (!userId) return res.status(401).json({ error: '未登录' })
 
   const { answers } = req.body
   if (!answers || typeof answers !== 'object') {
-    return sendBadRequest(res, '缺少答案数据', {
-      requestId,
-      type: 'missing_answers',
-    })
+    return res.status(400).json({ error: '缺少答案数据' })
   }
 
   const { data: questions, error: questionsError } = await supabase
@@ -47,31 +53,14 @@ export default async function handler(req, res) {
     .select('*')
 
   if (questionsError) {
-    return handleApiError(req, res, questionsError, {
-      requestId,
-      logLabel: 'Failed to load questions during test submit:',
-      message: '提交失败，请稍后再试',
-      type: 'submit_load_questions_failed',
-      context: {
-        stage: 'load_questions',
-        userIdPrefix: userId.slice(0, 8),
-      },
-    })
+    return res.status(500).json(formatSupabaseError('load_questions', questionsError))
   }
 
   let unlockDecision = { unlocked: false, method: null }
   try {
     unlockDecision = await getUnlockDecision(userId)
   } catch (error) {
-    logApiError('Failed to resolve unlock decision during test submit:', {
-      req,
-      requestId,
-      error,
-      context: {
-        stage: 'resolve_unlock_decision',
-        userIdPrefix: userId.slice(0, 8),
-      },
-    })
+    console.error('Failed to resolve unlock decision during test submit:', error)
   }
 
   const scores = calculateScores(questions, answers)
@@ -106,16 +95,14 @@ export default async function handler(req, res) {
     .single()
 
   if (error) {
-    return handleApiError(req, res, error, {
-      requestId,
-      logLabel: 'Failed to insert test result:',
-      message: '提交失败，请稍后再试',
-      type: 'submit_insert_failed',
-      context: {
-        stage: 'insert_result',
-        ...insertSummary,
-      },
+    console.error('Failed to insert test result:', {
+      ...insertSummary,
+      message: error.message,
+      code: error.code ?? null,
+      details: error.details ?? null,
+      hint: error.hint ?? null,
     })
+    return res.status(500).json(formatSupabaseError('insert_result', error))
   }
   console.log('Inserted test result:', insertSummary)
   res.json(buildSubmitResponse(data, unlockDecision))

@@ -54,18 +54,21 @@ async function loadStatusHandler({
     method: null,
   },
   reconciledPayment = null,
+  reconcileError = null,
 } = {}) {
   vi.resetModules()
 
   const getUserId = vi.fn(async () => userId)
   const getPaymentForUser = vi.fn(async () => payment)
   const getLatestPaymentForUser = vi.fn(async () => latestPayment)
-  const reconcilePaymentStatus = vi.fn(async ({ payment: targetPayment }) => (
-    reconciledPayment ?? {
+  const reconcilePaymentStatus = vi.fn(async ({ payment: targetPayment }) => {
+    if (reconcileError) throw reconcileError
+
+    return reconciledPayment ?? {
       ...targetPayment,
       status: 'success',
     }
-  ))
+  })
   const toClientPayment = vi.fn((value) => (value ? {
     id: value.id,
     provider: value.provider,
@@ -168,7 +171,9 @@ describe('payment status handler', () => {
     expect(res.headers['Retry-After']).toBe('17')
     expect(res.body).toEqual({
       ok: false,
-      error: 'rate_limited',
+      error: '请求过于频繁，请稍后再试',
+      type: 'payment_status_rate_limited',
+      requestId: expect.any(String),
       retry_after: 17,
     })
   })
@@ -241,9 +246,50 @@ describe('payment status handler', () => {
     expect(res.headers['Retry-After']).toBe('29')
     expect(res.body).toEqual({
       ok: false,
-      error: 'rate_limited',
+      error: '请求过于频繁，请稍后再试',
+      type: 'payment_status_rate_limited',
+      requestId: expect.any(String),
       retry_after: 29,
     })
+  })
+
+  it('does not expose internal payment channel errors from active reconciliation', async () => {
+    const payment = {
+      id: 42,
+      provider: 'alipay',
+      status: 'pending',
+      provider_order_no: 'ALI20260612000000LEAKTEST',
+    }
+    const { handler, mocks } = await loadStatusHandler({
+      payment,
+      reconcileError: new Error(
+        '支付宝查单失败 key=alipay-secret&sign=raw-signature token_hash=raw-token SQL 42P01 relation "payments"'
+      ),
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = createRes()
+    await handler(createReq({
+      query: { payment_id: '42' },
+      headers: { 'x-request-id': 'req-payment-status-1' },
+    }), res)
+
+    expect(mocks.reconcilePaymentStatus).toHaveBeenCalledTimes(1)
+    expect(res.statusCode).toBe(500)
+    expect(res.headers['X-Request-Id']).toBe('req-payment-status-1')
+    expect(res.body).toEqual({
+      error: '支付状态查询失败，请稍后再试',
+      type: 'payment_status_failed',
+      requestId: 'req-payment-status-1',
+    })
+
+    const bodyText = JSON.stringify(res.body)
+    expect(bodyText).not.toContain('alipay-secret')
+    expect(bodyText).not.toContain('raw-signature')
+    expect(bodyText).not.toContain('token_hash')
+    expect(bodyText).not.toContain('SQL')
+    expect(bodyText).not.toContain('42P01')
+    expect(bodyText).not.toContain('relation "payments"')
   })
 
   it.each(['success', 'failed', 'refunded', 'cancelled'])(

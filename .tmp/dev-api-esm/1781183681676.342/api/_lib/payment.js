@@ -705,7 +705,6 @@ export async function queryAlipayTrade({ req, providerOrderNo, providerTradeNo }
   }
 
   return {
-    alipayConfig,
     payload: responsePayload,
     raw: parsed,
     responseSignatureValid,
@@ -730,85 +729,9 @@ export async function queryQixiangTrade({ req, providerOrderNo }) {
     throw new Error(`七相查单请求失败: HTTP ${response.status}`)
   }
 
-  const payload = parseJsonResponse(rawText, '七相查单返回了非 JSON 响应')
-
   return {
     qixiangConfig,
-    payload,
-    responseSignaturePresent: Boolean(String(payload?.sign || '').trim()),
-    responseSignatureValid: verifyQixiangSignature(payload, qixiangConfig.key),
-  }
-}
-
-function getPaymentPayloadValue(payload, key) {
-  const value = payload?.[key]
-  if (value === undefined || value === null) return ''
-  return String(value).trim()
-}
-
-function requirePaymentPayloadValue(payload, key, message) {
-  const value = getPaymentPayloadValue(payload, key)
-  if (!value) {
-    throw new Error(message)
-  }
-
-  return value
-}
-
-function parseRequiredPaymentAmountToFen(amount, label) {
-  const amountText = String(amount ?? '').trim()
-  if (!amountText) {
-    throw new Error(`${label}缺失`)
-  }
-
-  if (!/^\d+(?:\.\d{1,2})?$/.test(amountText)) {
-    throw new Error(`${label}非法`)
-  }
-
-  const amountFen = parseAmountToFen(amountText)
-  if (!Number.isFinite(amountFen) || amountFen <= 0) {
-    throw new Error(`${label}非法`)
-  }
-
-  return amountFen
-}
-
-function validateAlipayTradeQueryPayload({ payment, alipayConfig, payload, responseSignatureValid }) {
-  if (responseSignatureValid !== true) {
-    throw new Error('支付宝交易查询响应验签未通过，需人工复核')
-  }
-
-  const outTradeNo = requirePaymentPayloadValue(
-    payload,
-    'out_trade_no',
-    '支付宝查单响应缺少订单号，需人工复核'
-  )
-  if (outTradeNo !== payment.provider_order_no) {
-    throw new Error('支付宝订单号与本地支付单不一致')
-  }
-
-  const sellerId = firstNonEmpty(payload?.seller_id, payload?.seller_user_id)
-  if (!sellerId) {
-    throw new Error('支付宝查单响应缺少商户号，需人工复核')
-  }
-  if (sellerId !== alipayConfig.sellerId) {
-    throw new Error('支付宝商户号与本地配置不一致')
-  }
-
-  const amountFen = parseRequiredPaymentAmountToFen(payload?.total_amount, '支付宝查单金额')
-  if (!Number.isInteger(payment.amount) || amountFen !== payment.amount) {
-    throw new Error('支付宝订单金额与本地支付单不一致')
-  }
-
-  const tradeNo = getPaymentPayloadValue(payload, 'trade_no')
-  if (payment.provider_trade_no && tradeNo && payment.provider_trade_no !== tradeNo) {
-    throw new Error('支付宝交易号与本地支付单不一致')
-  }
-
-  return {
-    provider_trade_no: tradeNo || payment.provider_trade_no,
-    buyer_id: getPaymentPayloadValue(payload, 'buyer_user_id') || payment.buyer_id,
-    buyer_logon_id: getPaymentPayloadValue(payload, 'buyer_logon_id') || payment.buyer_logon_id,
+    payload: parseJsonResponse(rawText, '七相查单返回了非 JSON 响应'),
   }
 }
 
@@ -825,63 +748,31 @@ function isQixiangQuerySuccess(payload) {
   return getQixiangPayloadValue(payload, 'status') === '1'
 }
 
-function validateQixiangPaymentPayload({
-  payment,
-  qixiangConfig,
-  payload,
-  notifyPayload = null,
-  requireQueryFields = false,
-}) {
+function validateQixiangPaymentPayload({ payment, qixiangConfig, payload, notifyPayload = null }) {
   const mergedPayload = {
     ...(notifyPayload || {}),
     ...(payload || {}),
   }
   const outTradeNo = getQixiangPayloadValue(payload, 'out_trade_no')
-  if (!outTradeNo && requireQueryFields) {
-    throw new Error('七相查单响应缺少订单号，需人工复核')
-  }
   if (outTradeNo && outTradeNo !== payment.provider_order_no) {
     throw new Error('七相订单号与本地支付单不一致')
   }
 
-  const queryPid = getQixiangPayloadValue(payload, 'pid')
-  const notifyPid = getQixiangPayloadValue(notifyPayload, 'pid')
-  const pid = requireQueryFields ? queryPid : getQixiangPayloadValue(mergedPayload, 'pid')
-  if (!pid && requireQueryFields) {
-    throw new Error('七相查单响应缺少商户 PID，需人工复核')
-  }
+  const pid = getQixiangPayloadValue(mergedPayload, 'pid')
   if (pid && pid !== qixiangConfig.pid) {
     throw new Error('七相商户 PID 与本地配置不一致')
   }
-  if (queryPid && notifyPid && queryPid !== notifyPid) {
-    throw new Error('七相通知商户 PID 与查单响应不一致')
-  }
 
-  const queryType = getQixiangPayloadValue(payload, 'type').toLowerCase()
-  const notifyType = getQixiangPayloadValue(notifyPayload, 'type').toLowerCase()
-  const type = requireQueryFields ? queryType : getQixiangPayloadValue(mergedPayload, 'type').toLowerCase()
-  if (!type && requireQueryFields) {
-    throw new Error('七相查单响应缺少支付渠道，需人工复核')
-  }
+  const type = getQixiangPayloadValue(mergedPayload, 'type').toLowerCase()
   if (type && type !== qixiangConfig.payType) {
     throw new Error('七相支付渠道与本地配置不一致')
   }
-  if (queryType && notifyType && queryType !== notifyType) {
-    throw new Error('七相通知支付渠道与查单响应不一致')
-  }
 
-  const queryAmount = getQixiangPayloadValue(payload, 'money', 'total_amount')
-  const notifyAmount = getQixiangPayloadValue(notifyPayload, 'money', 'total_amount')
-  const amount = requireQueryFields ? queryAmount : queryAmount || notifyAmount
-  const amountFen = parseRequiredPaymentAmountToFen(amount, '七相订单金额')
-  if (!Number.isInteger(payment.amount) || amountFen !== payment.amount) {
+  const amount = getQixiangPayloadValue(payload, 'money', 'total_amount') ||
+    getQixiangPayloadValue(notifyPayload, 'money', 'total_amount')
+  const amountFen = parseAmountToFen(amount)
+  if (!Number.isFinite(amountFen) || amountFen !== payment.amount) {
     throw new Error('七相订单金额与本地支付单不一致')
-  }
-  if (queryAmount && notifyAmount) {
-    const notifyAmountFen = parseRequiredPaymentAmountToFen(notifyAmount, '七相通知金额')
-    if (notifyAmountFen !== amountFen) {
-      throw new Error('七相通知金额与查单响应不一致')
-    }
   }
 
   const tradeNo = getQixiangPayloadValue(payload, 'trade_no')
@@ -900,26 +791,8 @@ function parseQixiangTime(value) {
   return parseAlipayTime(value)
 }
 
-function assertQixiangQueryTrust({
-  responseSignaturePresent,
-  responseSignatureValid,
-}) {
-  if (!responseSignaturePresent) {
-    throw new Error('七相查单响应未提供可验证签名，需人工复核')
-  }
-
-  if (responseSignatureValid !== true) {
-    throw new Error('七相查单响应验签未通过，需人工复核')
-  }
-}
-
 export async function reconcileQixiangPaymentStatus({ req, payment, notifyPayload = null, requireSuccess = false }) {
-  const {
-    qixiangConfig,
-    payload,
-    responseSignaturePresent,
-    responseSignatureValid,
-  } = await queryQixiangTrade({
+  const { qixiangConfig, payload } = await queryQixiangTrade({
     req,
     providerOrderNo: payment.provider_order_no,
   })
@@ -932,17 +805,11 @@ export async function reconcileQixiangPaymentStatus({ req, payment, notifyPayloa
     return payment
   }
 
-  assertQixiangQueryTrust({
-    responseSignaturePresent,
-    responseSignatureValid,
-  })
-
   const baseFields = validateQixiangPaymentPayload({
     payment,
     qixiangConfig,
     payload,
     notifyPayload,
-    requireQueryFields: true,
   })
 
   const updatedPayment = await transitionPaymentStatus(payment, PAYMENT_STATUS.SUCCESS, {
@@ -951,8 +818,6 @@ export async function reconcileQixiangPaymentStatus({ req, payment, notifyPayloa
       source: notifyPayload ? 'payqixiang_notify_with_query' : 'payqixiang_trade_query',
       notify: notifyPayload,
       query: payload,
-      query_response_signature_present: responseSignaturePresent,
-      query_response_signature_valid: responseSignatureValid,
     },
     paid_at:
       payment.paid_at ||
@@ -977,15 +842,11 @@ export async function reconcilePaymentStatus({ req, payment }) {
 
   if (payment.provider !== PAYMENT_PROVIDER.ALIPAY) return payment
 
-  const { alipayConfig, payload, raw, responseSignatureValid } = await queryAlipayTrade({
+  const { payload, raw, responseSignatureValid } = await queryAlipayTrade({
     req,
     providerOrderNo: payment.provider_order_no,
     providerTradeNo: payment.provider_trade_no,
   })
-
-  if (responseSignatureValid !== true) {
-    throw new Error('支付宝交易查询响应验签未通过，需人工复核')
-  }
 
   if (payload.code !== '10000') {
     if (payload.sub_code === 'ACQ.TRADE_NOT_EXIST') {
@@ -995,19 +856,30 @@ export async function reconcilePaymentStatus({ req, payment }) {
     throw new Error(payload.sub_msg || payload.msg || '支付宝订单查询失败')
   }
 
-  const verifiedFields = validateAlipayTradeQueryPayload({
-    payment,
-    alipayConfig,
-    payload,
-    responseSignatureValid,
-  })
+  const amountFen = parseAmountToFen(payload.total_amount)
+  if (Number.isFinite(amountFen) && Number.isInteger(payment.amount) && amountFen !== payment.amount) {
+    throw new Error('支付宝订单金额与本地支付单不一致')
+  }
+
+  if (payload.out_trade_no && payload.out_trade_no !== payment.provider_order_no) {
+    throw new Error('支付宝订单号与本地支付单不一致')
+  }
+
   const baseFields = {
-    ...verifiedFields,
+    provider_trade_no: payload.trade_no || payment.provider_trade_no,
+    buyer_id: payload.buyer_user_id || payment.buyer_id,
+    buyer_logon_id: payload.buyer_logon_id || payment.buyer_logon_id,
     notify_payload: {
       source: 'trade_query',
       response_signature_valid: responseSignatureValid,
       response: raw,
     },
+  }
+
+  if (!responseSignatureValid) {
+    console.warn(
+      `支付宝交易查询响应验签未通过，已按订单号和金额校验结果继续补单: ${payment.provider_order_no}`
+    )
   }
 
   if (payload.trade_status === 'TRADE_SUCCESS' || payload.trade_status === 'TRADE_FINISHED') {
@@ -1236,9 +1108,6 @@ export async function transitionPaymentStatus(payment, nextStatus, fields = {}) 
 
 export function toClientPayment(payment) {
   if (!payment) return null
-  const clientFailureReason = payment.failure_reason
-    ? '支付未完成，请重新发起支付或联系客服处理'
-    : null
 
   return {
     id: payment.id,
@@ -1255,6 +1124,6 @@ export function toClientPayment(payment) {
     paid_at: payment.paid_at,
     created_at: payment.created_at,
     updated_at: payment.updated_at,
-    failure_reason: clientFailureReason,
+    failure_reason: payment.failure_reason,
   }
 }

@@ -1,6 +1,14 @@
 import { supabase, getUserId } from '../_lib/supabase.js'
+import {
+  attachRequestId,
+  handleApiError,
+  sendBadRequest,
+  sendConflict,
+  sendError,
+  sendUnauthorized,
+} from '../_lib/errors.js'
 
-async function getReferralInfo(userId, res) {
+async function getReferralInfo(req, userId, res) {
   const [
     profileResponse,
     referralCountResponse,
@@ -24,15 +32,39 @@ async function getReferralInfo(userId, res) {
   ])
 
   if (profileResponse.error) {
-    return res.status(500).json({ error: profileResponse.error.message })
+    return handleApiError(req, res, profileResponse.error, {
+      logLabel: 'Failed to load referral profile:',
+      message: '邀请信息加载失败，请稍后再试',
+      type: 'referral_profile_load_failed',
+      context: {
+        stage: 'load_profile',
+        userIdPrefix: userId.slice(0, 8),
+      },
+    })
   }
 
   if (referralCountResponse.error) {
-    return res.status(500).json({ error: referralCountResponse.error.message })
+    return handleApiError(req, res, referralCountResponse.error, {
+      logLabel: 'Failed to count referrals:',
+      message: '邀请信息加载失败，请稍后再试',
+      type: 'referral_count_failed',
+      context: {
+        stage: 'count_referrals',
+        userIdPrefix: userId.slice(0, 8),
+      },
+    })
   }
 
   if (usedReferralResponse.error) {
-    return res.status(500).json({ error: usedReferralResponse.error.message })
+    return handleApiError(req, res, usedReferralResponse.error, {
+      logLabel: 'Failed to load used referral:',
+      message: '邀请信息加载失败，请稍后再试',
+      type: 'used_referral_load_failed',
+      context: {
+        stage: 'load_used_referral',
+        userIdPrefix: userId.slice(0, 8),
+      },
+    })
   }
 
   let usedInviteCode = ''
@@ -46,7 +78,16 @@ async function getReferralInfo(userId, res) {
       .maybeSingle()
 
     if (inviterProfileError) {
-      return res.status(500).json({ error: inviterProfileError.message })
+      return handleApiError(req, res, inviterProfileError, {
+        logLabel: 'Failed to load inviter profile:',
+        message: '邀请信息加载失败，请稍后再试',
+        type: 'inviter_profile_load_failed',
+        context: {
+          stage: 'load_inviter_profile',
+          userIdPrefix: userId.slice(0, 8),
+          inviterIdPrefix: usedReferralResponse.data.inviter_id.slice(0, 8),
+        },
+      })
     }
 
     usedInviteCode = inviterProfile?.invite_code || ''
@@ -64,7 +105,12 @@ async function getReferralInfo(userId, res) {
 
 async function trackReferral(req, userId, res) {
   const inviteCode = String(req.body?.invite_code || '').trim().toLowerCase()
-  if (!inviteCode) return res.status(400).json({ error: '缺少邀请码' })
+  if (!inviteCode) {
+    return sendBadRequest(res, '缺少邀请码', {
+      requestId: req.requestId,
+      type: 'missing_invite_code',
+    })
+  }
 
   const { data: existingReferral, error: existingReferralError } = await supabase
     .from('referrals')
@@ -74,11 +120,22 @@ async function trackReferral(req, userId, res) {
     .maybeSingle()
 
   if (existingReferralError) {
-    return res.status(500).json({ error: existingReferralError.message })
+    return handleApiError(req, res, existingReferralError, {
+      logLabel: 'Failed to check existing referral:',
+      message: '邀请码提交失败，请稍后再试',
+      type: 'existing_referral_check_failed',
+      context: {
+        stage: 'check_existing_referral',
+        userIdPrefix: userId.slice(0, 8),
+      },
+    })
   }
 
   if (existingReferral) {
-    return res.status(409).json({ error: '你已经填写过好友邀请码' })
+    return sendConflict(res, '你已经填写过好友邀请码', {
+      requestId: req.requestId,
+      type: 'referral_already_used',
+    })
   }
 
   const { data: inviter, error: inviterError } = await supabase
@@ -88,11 +145,22 @@ async function trackReferral(req, userId, res) {
     .maybeSingle()
 
   if (inviterError) {
-    return res.status(500).json({ error: inviterError.message })
+    return handleApiError(req, res, inviterError, {
+      logLabel: 'Failed to load inviter by invite code:',
+      message: '邀请码提交失败，请稍后再试',
+      type: 'inviter_lookup_failed',
+      context: {
+        stage: 'lookup_inviter',
+        userIdPrefix: userId.slice(0, 8),
+      },
+    })
   }
 
   if (!inviter || inviter.id === userId) {
-    return res.status(400).json({ error: '无效邀请码' })
+    return sendBadRequest(res, '无效邀请码', {
+      requestId: req.requestId,
+      type: 'invalid_invite_code',
+    })
   }
 
   const { error } = await supabase
@@ -100,19 +168,48 @@ async function trackReferral(req, userId, res) {
     .insert({ inviter_id: inviter.id, invitee_id: userId })
 
   if (error?.code === '23505') {
-    return res.status(409).json({ error: '邀请码已提交，请勿重复填写' })
+    return sendConflict(res, '邀请码已提交，请勿重复填写', {
+      requestId: req.requestId,
+      type: 'referral_duplicate',
+    })
   }
 
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) {
+    return handleApiError(req, res, error, {
+      logLabel: 'Failed to insert referral:',
+      message: '邀请码提交失败，请稍后再试',
+      type: 'referral_insert_failed',
+      context: {
+        stage: 'insert_referral',
+        userIdPrefix: userId.slice(0, 8),
+        inviterIdPrefix: inviter.id.slice(0, 8),
+      },
+    })
+  }
   return res.json({ success: true })
 }
 
 export default async function handler(req, res) {
-  if (!['GET', 'POST'].includes(req.method)) return res.status(405).end()
+  const requestId = attachRequestId(req, res)
+  if (!['GET', 'POST'].includes(req.method)) {
+    return sendError(res, 405, '请求方法不支持', {
+      type: 'method_not_allowed',
+      requestId,
+    })
+  }
 
-  const userId = await getUserId(req)
-  if (!userId) return res.status(401).json({ error: '未登录' })
+  try {
+    const userId = await getUserId(req)
+    if (!userId) return sendUnauthorized(res, { requestId })
 
-  if (req.method === 'GET') return getReferralInfo(userId, res)
-  return trackReferral(req, userId, res)
+    if (req.method === 'GET') return getReferralInfo(req, userId, res)
+    return trackReferral(req, userId, res)
+  } catch (error) {
+    return handleApiError(req, res, error, {
+      requestId,
+      logLabel: 'Unhandled referral API error:',
+      message: req.method === 'GET' ? '邀请信息加载失败，请稍后再试' : '邀请码提交失败，请稍后再试',
+      type: 'referral_unhandled_error',
+    })
+  }
 }

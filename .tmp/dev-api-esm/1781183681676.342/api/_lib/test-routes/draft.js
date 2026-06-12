@@ -1,5 +1,22 @@
 import { supabase, getUserId } from '../supabase.js'
-import { attachRequestId, handleApiError, sendBadRequest, sendError, sendUnauthorized } from '../errors.js'
+
+function jsonError(res, status, error, details = {}) {
+  return res.status(status).json({
+    error,
+    ...details,
+  })
+}
+
+function formatSupabaseError(stage, error) {
+  return {
+    error: error?.message ?? 'Unknown Supabase error',
+    stage,
+    message: error?.message ?? null,
+    code: error?.code ?? null,
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+  }
+}
 
 export function buildDraftPayload(body = {}, userId, now = new Date()) {
   const { questions, answers, updatedAt } = body
@@ -44,7 +61,7 @@ export function buildDraftPayload(body = {}, userId, now = new Date()) {
   }
 }
 
-async function handleGet(req, userId, res) {
+async function handleGet(userId, res) {
   const { data, error } = await supabase
     .from('test_drafts')
     .select('draft, updated_at')
@@ -52,15 +69,7 @@ async function handleGet(req, userId, res) {
     .maybeSingle()
 
   if (error) {
-    return handleApiError(req, res, error, {
-      logLabel: 'Failed to load test draft:',
-      message: '草稿加载失败，请稍后再试',
-      type: 'draft_load_failed',
-      context: {
-        stage: 'load_draft',
-        userIdPrefix: userId.slice(0, 8),
-      },
-    })
+    return res.status(500).json(formatSupabaseError('load_draft', error))
   }
 
   return res.json({
@@ -74,10 +83,7 @@ async function handlePut(req, userId, res) {
   const { payload, error: validationError } = buildDraftPayload(req.body, userId)
 
   if (validationError) {
-    return sendBadRequest(res, validationError.body.error, {
-      requestId: req.requestId,
-      type: 'invalid_draft_payload',
-    })
+    return res.status(validationError.status).json(validationError.body)
   }
 
   const { data, error } = await supabase
@@ -87,15 +93,7 @@ async function handlePut(req, userId, res) {
     .single()
 
   if (error) {
-    return handleApiError(req, res, error, {
-      logLabel: 'Failed to save test draft:',
-      message: '草稿保存失败，请稍后再试',
-      type: 'draft_save_failed',
-      context: {
-        stage: 'save_draft',
-        userIdPrefix: userId.slice(0, 8),
-      },
-    })
+    return res.status(500).json(formatSupabaseError('save_draft', error))
   }
 
   return res.json({
@@ -105,54 +103,35 @@ async function handlePut(req, userId, res) {
   })
 }
 
-async function handleDelete(req, userId, res) {
+async function handleDelete(userId, res) {
   const { error } = await supabase
     .from('test_drafts')
     .delete()
     .eq('user_id', userId)
 
   if (error) {
-    return handleApiError(req, res, error, {
-      logLabel: 'Failed to delete test draft:',
-      message: '草稿清理失败，请稍后再试',
-      type: 'draft_delete_failed',
-      context: {
-        stage: 'delete_draft',
-        userIdPrefix: userId.slice(0, 8),
-      },
-    })
+    return res.status(500).json(formatSupabaseError('delete_draft', error))
   }
 
   return res.json({ ok: true })
 }
 
 export default async function handler(req, res) {
-  const requestId = attachRequestId(req, res)
-
   if (!['GET', 'PUT', 'DELETE'].includes(req.method)) {
-    return sendError(res, 405, '请求方法不支持', {
-      type: 'method_not_allowed',
-      requestId,
-    })
+    return jsonError(res, 405, 'Method Not Allowed')
   }
 
   const userId = await getUserId(req)
-  if (!userId) return sendUnauthorized(res, { requestId })
+  if (!userId) return jsonError(res, 401, '未登录')
 
   try {
-    if (req.method === 'GET') return await handleGet(req, userId, res)
+    if (req.method === 'GET') return await handleGet(userId, res)
     if (req.method === 'PUT') return await handlePut(req, userId, res)
-    return await handleDelete(req, userId, res)
+    return await handleDelete(userId, res)
   } catch (error) {
-    return handleApiError(req, res, error, {
-      requestId,
-      logLabel: 'Unhandled test draft API error:',
-      message: '草稿服务异常，请稍后再试',
-      type: 'draft_unhandled_error',
-      context: {
-        stage: 'unhandled',
-        userIdPrefix: userId.slice(0, 8),
-      },
+    console.error('Unhandled test draft API error:', error)
+    return jsonError(res, 500, '草稿服务异常', {
+      message: error instanceof Error ? error.message : String(error),
     })
   }
 }

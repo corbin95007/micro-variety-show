@@ -1,15 +1,5 @@
 import { sendFeedbackEmail, getMailerRuntimeErrorMessage } from '../_lib/mailer.js'
 import { supabase, getUserId } from '../_lib/supabase.js'
-import {
-  attachRequestId,
-  handleApiError,
-  logApiError,
-  redactSensitiveText,
-  sendBadRequest,
-  sendError,
-  sendRateLimited,
-  sendUnauthorized,
-} from '../_lib/errors.js'
 
 const MESSAGE_MIN_LENGTH = 10
 const MESSAGE_MAX_LENGTH = 1000
@@ -41,6 +31,17 @@ function sanitizeMessage(value) {
   return String(value).replace(/\s+/g, ' ').trim()
 }
 
+function formatSupabaseError(stage, error) {
+  return {
+    error: error?.message ?? 'Unknown Supabase error',
+    stage,
+    message: error?.message ?? null,
+    code: error?.code ?? null,
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+  }
+}
+
 function getTodayStartIso() {
   const now = new Date()
   return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
@@ -56,10 +57,7 @@ async function enforceFeedbackRateLimit(userId) {
     .maybeSingle()
 
   if (latestError) {
-    throw Object.assign(new Error('Failed to check recent feedback'), {
-      supabaseError: latestError,
-      stage: 'check_recent_feedback',
-    })
+    throw Object.assign(new Error(latestError.message), { supabaseError: latestError, stage: 'check_recent_feedback' })
   }
 
   if (latest?.created_at) {
@@ -80,10 +78,7 @@ async function enforceFeedbackRateLimit(userId) {
     .gte('created_at', getTodayStartIso())
 
   if (countError) {
-    throw Object.assign(new Error('Failed to check daily feedback count'), {
-      supabaseError: countError,
-      stage: 'check_daily_feedback',
-    })
+    throw Object.assign(new Error(countError.message), { supabaseError: countError, stage: 'check_daily_feedback' })
   }
 
   if ((count ?? 0) >= DAILY_LIMIT) {
@@ -97,7 +92,7 @@ async function enforceFeedbackRateLimit(userId) {
   return { limited: false }
 }
 
-async function loadUserContext(req, userId) {
+async function loadUserContext(userId) {
   const [{ data: authUserData, error: authUserError }, { data: profile, error: profileError }] = await Promise.all([
     supabase.auth.admin.getUserById(userId),
     supabase
@@ -108,26 +103,19 @@ async function loadUserContext(req, userId) {
   ])
 
   if (authUserError) {
-    logApiError('Failed to load feedback auth user:', {
-      req,
-      error: authUserError,
-      context: {
-        stage: 'load_auth_user',
-        userIdPrefix: userId.slice(0, 8),
-      },
-      level: 'warn',
+    console.error('Failed to load feedback auth user:', {
+      userIdPrefix: userId.slice(0, 8),
+      message: authUserError.message,
+      code: authUserError.code ?? null,
     })
   }
 
   if (profileError) {
-    logApiError('Failed to load feedback profile:', {
-      req,
-      error: profileError,
-      context: {
-        stage: 'load_profile',
-        userIdPrefix: userId.slice(0, 8),
-      },
-      level: 'warn',
+    console.error('Failed to load feedback profile:', {
+      userIdPrefix: userId.slice(0, 8),
+      message: profileError.message,
+      code: profileError.code ?? null,
+      details: profileError.details ?? null,
     })
   }
 
@@ -147,46 +135,29 @@ function toClientFeedback(report) {
 }
 
 export default async function handler(req, res) {
-  const requestId = attachRequestId(req, res)
-  if (req.method !== 'POST') {
-    return sendError(res, 405, '请求方法不支持', {
-      type: 'method_not_allowed',
-      requestId,
-    })
-  }
+  if (req.method !== 'POST') return res.status(405).end()
 
   try {
     const userId = await getUserId(req)
-    if (!userId) return sendUnauthorized(res, { requestId })
+    if (!userId) return res.status(401).json({ error: '未登录' })
 
     const body = normalizeBody(req.body)
     const message = sanitizeMessage(body.message)
 
     if (message.length < MESSAGE_MIN_LENGTH) {
-      return sendBadRequest(res, `反馈内容至少需要 ${MESSAGE_MIN_LENGTH} 个字`, {
-        requestId,
-        type: 'feedback_message_too_short',
-      })
+      return res.status(400).json({ error: `反馈内容至少需要 ${MESSAGE_MIN_LENGTH} 个字` })
     }
 
     if (message.length > MESSAGE_MAX_LENGTH) {
-      return sendBadRequest(res, `反馈内容不能超过 ${MESSAGE_MAX_LENGTH} 个字`, {
-        requestId,
-        type: 'feedback_message_too_long',
-      })
+      return res.status(400).json({ error: `反馈内容不能超过 ${MESSAGE_MAX_LENGTH} 个字` })
     }
 
     const rateLimit = await enforceFeedbackRateLimit(userId)
     if (rateLimit.limited) {
-      return sendRateLimited(res, {
-        requestId,
-        message: rateLimit.error,
-        retryAfterSeconds: rateLimit.status === 429 ? 60 : undefined,
-        type: 'feedback_rate_limited',
-      })
+      return res.status(rateLimit.status).json({ error: rateLimit.error })
     }
 
-    const userContext = await loadUserContext(req, userId)
+    const userContext = await loadUserContext(userId)
     const reportPayload = {
       user_id: userId,
       email: userContext.email,
@@ -208,16 +179,14 @@ export default async function handler(req, res) {
       .single()
 
     if (insertError) {
-      return handleApiError(req, res, insertError, {
-        requestId,
-        logLabel: 'Failed to insert feedback report:',
-        message: '提交问题反馈失败，请稍后再试',
-        type: 'feedback_insert_failed',
-        context: {
-          stage: 'insert_feedback',
-          userIdPrefix: userId.slice(0, 8),
-        },
+      console.error('Failed to insert feedback report:', {
+        userIdPrefix: userId.slice(0, 8),
+        message: insertError.message,
+        code: insertError.code ?? null,
+        details: insertError.details ?? null,
+        hint: insertError.hint ?? null,
       })
+      return res.status(500).json(formatSupabaseError('insert_feedback', insertError))
     }
 
     try {
@@ -235,14 +204,11 @@ export default async function handler(req, res) {
         .single()
 
       if (sentUpdateError) {
-        logApiError('Failed to update feedback email sent state:', {
-          req,
-          requestId,
-          error: sentUpdateError,
-          context: {
-            stage: 'mark_email_sent',
-            feedbackId: report.id,
-          },
+        console.error('Failed to update feedback email sent state:', {
+          feedbackId: report.id,
+          message: sentUpdateError.message,
+          code: sentUpdateError.code ?? null,
+          details: sentUpdateError.details ?? null,
         })
       }
 
@@ -251,17 +217,11 @@ export default async function handler(req, res) {
         email_status: 'sent',
       })
     } catch (mailError) {
-      const emailError = redactSensitiveText(getMailerRuntimeErrorMessage(mailError))
-      logApiError('Failed to send feedback email:', {
-        req,
-        requestId,
-        error: mailError,
-        context: {
-          stage: 'send_feedback_email',
-          feedbackId: report.id,
-          userIdPrefix: userId.slice(0, 8),
-          emailError,
-        },
+      const emailError = getMailerRuntimeErrorMessage(mailError)
+      console.error('Failed to send feedback email:', {
+        feedbackId: report.id,
+        userIdPrefix: userId.slice(0, 8),
+        message: emailError,
       })
 
       const { data: failedReport, error: failedUpdateError } = await supabase
@@ -275,14 +235,11 @@ export default async function handler(req, res) {
         .single()
 
       if (failedUpdateError) {
-        logApiError('Failed to update feedback email failed state:', {
-          req,
-          requestId,
-          error: failedUpdateError,
-          context: {
-            stage: 'mark_email_failed',
-            feedbackId: report.id,
-          },
+        console.error('Failed to update feedback email failed state:', {
+          feedbackId: report.id,
+          message: failedUpdateError.message,
+          code: failedUpdateError.code ?? null,
+          details: failedUpdateError.details ?? null,
         })
       }
 
@@ -294,22 +251,10 @@ export default async function handler(req, res) {
     }
   } catch (error) {
     if (error?.supabaseError) {
-      return handleApiError(req, res, error.supabaseError, {
-        requestId,
-        logLabel: 'Failed to enforce feedback constraints:',
-        message: '提交问题反馈失败，请稍后再试',
-        type: 'feedback_constraint_check_failed',
-        context: {
-          stage: error.stage,
-        },
-      })
+      return res.status(500).json(formatSupabaseError(error.stage, error.supabaseError))
     }
 
-    return handleApiError(req, res, error, {
-      requestId,
-      logLabel: 'Failed to create feedback report:',
-      message: '提交问题反馈失败，请稍后再试',
-      type: 'feedback_unhandled_error',
-    })
+    console.error('Failed to create feedback report:', error)
+    return res.status(500).json({ error: '提交问题反馈失败' })
   }
 }

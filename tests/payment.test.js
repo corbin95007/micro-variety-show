@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto'
+import { createSign, generateKeyPairSync } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://example.supabase.co'
@@ -21,6 +21,7 @@ const {
   serializeQixiangParamsForSigning,
   signAlipayParams,
   signQixiangParams,
+  toClientPayment,
   verifyAlipaySignature,
   verifyQixiangSignature,
 } = await import('../api/_lib/payment.js')
@@ -28,7 +29,279 @@ const {
   applyUnlockStateToResult,
 } = await import('../api/_lib/unlock.js')
 
+function signAlipayQueryResponse(payload, privateKey) {
+  const responseNodeName = 'alipay_trade_query_response'
+  const responseContent = JSON.stringify(payload)
+  const signer = createSign('RSA-SHA256')
+  signer.update(responseContent, 'utf8')
+  signer.end()
+
+  return JSON.stringify({
+    [responseNodeName]: payload,
+    sign: signer.sign(privateKey, 'base64'),
+  })
+}
+
+function createPaymentPersistenceMock(updatedPayment) {
+  const query = {
+    update: vi.fn(() => query),
+    eq: vi.fn(() => query),
+    select: vi.fn(() => query),
+    maybeSingle: vi.fn(async () => ({ data: updatedPayment, error: null })),
+    single: vi.fn(async () => ({ data: updatedPayment, error: null })),
+  }
+
+  return {
+    query,
+    supabase: {
+      from: vi.fn(() => query),
+    },
+  }
+}
+
+async function loadPaymentModuleWithMocks({ updatedPayment = null } = {}) {
+  vi.resetModules()
+
+  const persistence = createPaymentPersistenceMock(updatedPayment)
+  const setReportUnlocked = vi.fn(async () => null)
+
+  vi.doMock('../api/_lib/supabase.js', () => ({
+    supabase: persistence.supabase,
+  }))
+  vi.doMock('../api/_lib/unlock.js', () => ({
+    setReportUnlocked,
+  }))
+
+  const paymentModule = await import('../api/_lib/payment.js')
+
+  return {
+    ...paymentModule,
+    mocks: {
+      ...persistence,
+      setReportUnlocked,
+    },
+  }
+}
+
+function restorePaymentModuleMocks() {
+  vi.doUnmock('../api/_lib/supabase.js')
+  vi.doUnmock('../api/_lib/unlock.js')
+  vi.resetModules()
+}
+
+function withPaymentEnv(nextEnv) {
+  const originalEnv = Object.fromEntries(
+    Object.keys(nextEnv).map((key) => [key, process.env[key]])
+  )
+
+  Object.entries(nextEnv).forEach(([key, value]) => {
+    if (value == null) {
+      delete process.env[key]
+      return
+    }
+
+    process.env[key] = value
+  })
+
+  return () => {
+    Object.entries(originalEnv).forEach(([key, value]) => {
+      if (value == null) {
+        delete process.env[key]
+        return
+      }
+
+      process.env[key] = value
+    })
+  }
+}
+
+function createPendingPayment(overrides = {}) {
+  return {
+    id: 1,
+    user_id: 'user-1',
+    provider: 'alipay',
+    status: 'pending',
+    amount: 990,
+    provider_order_no: 'ALI20260501000000ABCD1234',
+    provider_trade_no: null,
+    buyer_id: null,
+    buyer_logon_id: null,
+    paid_at: null,
+    ...overrides,
+  }
+}
+
+function createAlipayEnv(privateKey, publicKey) {
+  return {
+    APP_BASE_URL: 'https://micro-variety-show.vercel.app',
+    ALIPAY_NOTIFY_BASE_URL: 'https://micro-variety-show.vercel.app',
+    ALIPAY_NOTIFY_URL: 'https://micro-variety-show.vercel.app/api/payment/notify/alipay',
+    ALIPAY_APP_ID: 'sandbox-app-id',
+    ALIPAY_PRIVATE_KEY: privateKey,
+    ALIPAY_PUBLIC_KEY: publicKey,
+    ALIPAY_SELLER_ID: '2088123412341234',
+    ALIPAY_GATEWAY: 'https://openapi-sandbox.dl.alipaydev.com/gateway.do',
+  }
+}
+
+function createSuccessfulAlipayQueryPayload(overrides = {}) {
+  return {
+    code: '10000',
+    msg: 'Success',
+    out_trade_no: 'ALI20260501000000ABCD1234',
+    trade_no: '2026050122001499999999999999',
+    buyer_user_id: '2088000000000001',
+    buyer_logon_id: 'sandbox_buyer@example.com',
+    seller_id: '2088123412341234',
+    total_amount: '9.90',
+    trade_status: 'TRADE_SUCCESS',
+    send_pay_date: '2026-05-01 20:00:00',
+    ...overrides,
+  }
+}
+
+async function setupAlipayReconcileScenario({
+  payload = createSuccessfulAlipayQueryPayload(),
+  signResponse = true,
+  paymentOverrides = {},
+} = {}) {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+  })
+  const restoreEnv = withPaymentEnv(createAlipayEnv(privateKey, publicKey))
+  const payment = createPendingPayment(paymentOverrides)
+  const updatedPayment = {
+    ...payment,
+    status: 'success',
+    provider_trade_no: payload.trade_no || payment.provider_trade_no,
+    buyer_id: payload.buyer_user_id || payment.buyer_id,
+    buyer_logon_id: payload.buyer_logon_id || payment.buyer_logon_id,
+    paid_at: '2026-05-01T12:00:00.000Z',
+  }
+  const originalFetch = global.fetch
+  const { reconcilePaymentStatus, mocks } = await loadPaymentModuleWithMocks({ updatedPayment })
+  const rawText = signResponse
+    ? signAlipayQueryResponse(payload, privateKey)
+    : JSON.stringify({
+      alipay_trade_query_response: payload,
+      sign: 'invalid-signature-for-test',
+    })
+
+  global.fetch = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    text: async () => rawText,
+  }))
+
+  return {
+    reconcilePaymentStatus,
+    mocks,
+    payment,
+    restore() {
+      global.fetch = originalFetch
+      restoreEnv()
+      restorePaymentModuleMocks()
+    },
+  }
+}
+
+function createQixiangEnv() {
+  return {
+    APP_BASE_URL: 'https://micro-variety-show.vercel.app',
+    QIXIANG_PID: '1001',
+    QIXIANG_KEY: 'test-secret',
+    QIXIANG_QUERY_URL: 'https://api.payqixiang.cn/api.php',
+    QIXIANG_QUERY_METHOD: null,
+    QIXIANG_QUERY_HTTP_METHOD: null,
+  }
+}
+
+function signQixiangQueryPayload(payload, key = 'test-secret') {
+  return {
+    ...payload,
+    sign: signQixiangParams(payload, key),
+  }
+}
+
+async function setupQixiangReconcileScenario({
+  payload,
+  paymentOverrides = {},
+} = {}) {
+  const payment = createPendingPayment({
+    provider: 'payqixiang',
+    amount: 1,
+    provider_order_no: 'QX20260608000000AABBCCDD',
+    ...paymentOverrides,
+  })
+  const responsePayload = payload || {
+    code: 1,
+    status: 1,
+    pid: '1001',
+    type: 'alipay',
+    out_trade_no: payment.provider_order_no,
+    trade_no: '202606082200000001',
+    money: '0.01',
+  }
+  const restoreEnv = withPaymentEnv(createQixiangEnv())
+  const originalFetch = global.fetch
+  const { reconcilePaymentStatus, reconcileQixiangPaymentStatus, mocks } = await loadPaymentModuleWithMocks({
+    updatedPayment: {
+      ...payment,
+      status: 'success',
+      provider_trade_no: responsePayload.trade_no || payment.provider_trade_no,
+      paid_at: '2026-06-08T12:00:00.000Z',
+    },
+  })
+
+  global.fetch = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(responsePayload),
+  }))
+
+  return {
+    reconcilePaymentStatus,
+    reconcileQixiangPaymentStatus,
+    mocks,
+    payment,
+    restore() {
+      global.fetch = originalFetch
+      restoreEnv()
+      restorePaymentModuleMocks()
+    },
+  }
+}
+
 describe('payment helpers', () => {
+  it('does not expose internal payment failure reasons to clients', () => {
+    const clientPayment = toClientPayment({
+      id: 1,
+      provider: 'payqixiang',
+      product_code: 'report_unlock',
+      amount: 990,
+      currency: 'CNY',
+      status: 'failed',
+      provider_order_no: 'QX20260612000000SAFEFAIL',
+      provider_trade_no: null,
+      paid_at: null,
+      created_at: '2026-06-12T00:00:00.000Z',
+      updated_at: '2026-06-12T00:01:00.000Z',
+      failure_reason:
+        '七相统一下单失败: key=qixiang-secret&sign=raw-signature token_hash=raw-token SQL 42P01 relation "payments"',
+    })
+
+    expect(clientPayment.failure_reason).toBe('支付未完成，请重新发起支付或联系客服处理')
+    const bodyText = JSON.stringify(clientPayment)
+    expect(bodyText).not.toContain('qixiang-secret')
+    expect(bodyText).not.toContain('raw-signature')
+    expect(bodyText).not.toContain('token_hash')
+    expect(bodyText).not.toContain('SQL')
+    expect(bodyText).not.toContain('42P01')
+    expect(bodyText).not.toContain('relation "payments"')
+  })
+
   it('formats fen amounts for alipay requests', () => {
     expect(formatAmountFenToYuan(990)).toBe('9.90')
     expect(formatAmountFenToYuan(1)).toBe('0.01')
@@ -320,7 +593,7 @@ describe('payment helpers', () => {
     }
   })
 
-  it('reconciles pending alipay payments to success from trade query', async () => {
+  it('reports invalid alipay trade query response signatures', async () => {
     const originalEnv = {
       APP_BASE_URL: process.env.APP_BASE_URL,
       ALIPAY_NOTIFY_BASE_URL: process.env.ALIPAY_NOTIFY_BASE_URL,
@@ -407,6 +680,244 @@ describe('payment helpers', () => {
 
         process.env[key] = value
       })
+    }
+  })
+
+  it('reconciles pending alipay payments only when query signature and required fields are valid', async () => {
+    const scenario = await setupAlipayReconcileScenario()
+
+    try {
+      const result = await scenario.reconcilePaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+      })
+
+      expect(result.status).toBe('success')
+      expect(scenario.mocks.query.update).toHaveBeenCalledWith(expect.objectContaining({
+        status: 'success',
+        provider_trade_no: '2026050122001499999999999999',
+        buyer_id: '2088000000000001',
+        buyer_logon_id: 'sandbox_buyer@example.com',
+        failure_reason: null,
+      }))
+      expect(scenario.mocks.setReportUnlocked).toHaveBeenCalledWith('user-1', true, 'payment')
+    } finally {
+      scenario.restore()
+    }
+  })
+
+  it('does not unlock alipay trade query results when response signature verification fails', async () => {
+    const scenario = await setupAlipayReconcileScenario({
+      signResponse: false,
+    })
+
+    try {
+      await expect(scenario.reconcilePaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+      })).rejects.toThrow('验签未通过')
+
+      expect(scenario.mocks.query.update).not.toHaveBeenCalled()
+      expect(scenario.mocks.setReportUnlocked).not.toHaveBeenCalled()
+    } finally {
+      scenario.restore()
+    }
+  })
+
+  it.each([
+    ['missing total_amount', { total_amount: undefined }, '金额缺失'],
+    ['non-numeric total_amount', { total_amount: 'not-a-number' }, '金额非法'],
+    ['mismatched total_amount', { total_amount: '9.91' }, '金额与本地支付单不一致'],
+  ])('does not unlock alipay trade query results with %s', async (_label, overrides, expectedMessage) => {
+    const scenario = await setupAlipayReconcileScenario({
+      payload: createSuccessfulAlipayQueryPayload(overrides),
+    })
+
+    try {
+      await expect(scenario.reconcilePaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+      })).rejects.toThrow(expectedMessage)
+
+      expect(scenario.mocks.query.update).not.toHaveBeenCalled()
+      expect(scenario.mocks.setReportUnlocked).not.toHaveBeenCalled()
+    } finally {
+      scenario.restore()
+    }
+  })
+
+  it('does not unlock alipay trade query results when merchant id mismatches', async () => {
+    const scenario = await setupAlipayReconcileScenario({
+      payload: createSuccessfulAlipayQueryPayload({
+        seller_id: '2088000000000000',
+      }),
+    })
+
+    try {
+      await expect(scenario.reconcilePaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+      })).rejects.toThrow('商户号与本地配置不一致')
+
+      expect(scenario.mocks.query.update).not.toHaveBeenCalled()
+      expect(scenario.mocks.setReportUnlocked).not.toHaveBeenCalled()
+    } finally {
+      scenario.restore()
+    }
+  })
+
+  it('does not unlock alipay trade query results when provider order number mismatches', async () => {
+    const scenario = await setupAlipayReconcileScenario({
+      payload: createSuccessfulAlipayQueryPayload({
+        out_trade_no: 'ALI20260501000000DIFFERENT',
+      }),
+    })
+
+    try {
+      await expect(scenario.reconcilePaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+      })).rejects.toThrow('订单号与本地支付单不一致')
+
+      expect(scenario.mocks.query.update).not.toHaveBeenCalled()
+      expect(scenario.mocks.setReportUnlocked).not.toHaveBeenCalled()
+    } finally {
+      scenario.restore()
+    }
+  })
+
+  it('does not unlock payqixiang active trade queries without a verifiable response signature', async () => {
+    const scenario = await setupQixiangReconcileScenario()
+
+    try {
+      await expect(scenario.reconcilePaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+      })).rejects.toThrow('未提供可验证签名')
+
+      expect(scenario.mocks.query.update).not.toHaveBeenCalled()
+      expect(scenario.mocks.setReportUnlocked).not.toHaveBeenCalled()
+    } finally {
+      scenario.restore()
+    }
+  })
+
+  it('does not unlock payqixiang active trade queries when response signature verification fails', async () => {
+    const scenario = await setupQixiangReconcileScenario({
+      payload: {
+        code: 1,
+        status: 1,
+        pid: '1001',
+        type: 'alipay',
+        out_trade_no: 'QX20260608000000AABBCCDD',
+        trade_no: '202606082200000001',
+        money: '0.01',
+        sign: '00000000000000000000000000000000',
+      },
+    })
+
+    try {
+      await expect(scenario.reconcilePaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+      })).rejects.toThrow('验签未通过')
+
+      expect(scenario.mocks.query.update).not.toHaveBeenCalled()
+      expect(scenario.mocks.setReportUnlocked).not.toHaveBeenCalled()
+    } finally {
+      scenario.restore()
+    }
+  })
+
+  it('does not unlock verified payqixiang notify reconciliation with an unsigned query confirmation', async () => {
+    const scenario = await setupQixiangReconcileScenario()
+
+    try {
+      await expect(scenario.reconcileQixiangPaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+        notifyPayload: {
+          pid: '1001',
+          type: 'alipay',
+          out_trade_no: scenario.payment.provider_order_no,
+          trade_no: '202606082200000001',
+          money: '0.01',
+          trade_status: 'TRADE_SUCCESS',
+        },
+        requireSuccess: true,
+      })).rejects.toThrow('未提供可验证签名')
+
+      expect(scenario.mocks.query.update).not.toHaveBeenCalled()
+      expect(scenario.mocks.setReportUnlocked).not.toHaveBeenCalled()
+    } finally {
+      scenario.restore()
+    }
+  })
+
+  it('does not unlock verified payqixiang notify reconciliation when query response signature verification fails', async () => {
+    const scenario = await setupQixiangReconcileScenario({
+      payload: {
+        code: 1,
+        status: 1,
+        pid: '1001',
+        type: 'alipay',
+        out_trade_no: 'QX20260608000000AABBCCDD',
+        trade_no: '202606082200000001',
+        money: '0.01',
+        sign: '00000000000000000000000000000000',
+      },
+    })
+
+    try {
+      await expect(scenario.reconcileQixiangPaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+        notifyPayload: {
+          pid: '1001',
+          type: 'alipay',
+          out_trade_no: scenario.payment.provider_order_no,
+          trade_no: '202606082200000001',
+          money: '0.01',
+          trade_status: 'TRADE_SUCCESS',
+        },
+        requireSuccess: true,
+      })).rejects.toThrow('验签未通过')
+
+      expect(scenario.mocks.query.update).not.toHaveBeenCalled()
+      expect(scenario.mocks.setReportUnlocked).not.toHaveBeenCalled()
+    } finally {
+      scenario.restore()
+    }
+  })
+
+  it('reconciles payqixiang only when the query response signature is verifiable', async () => {
+    const scenario = await setupQixiangReconcileScenario({
+      payload: signQixiangQueryPayload({
+        code: 1,
+        status: 1,
+        pid: '1001',
+        type: 'alipay',
+        out_trade_no: 'QX20260608000000AABBCCDD',
+        trade_no: '202606082200000001',
+        money: '0.01',
+      }),
+    })
+
+    try {
+      const result = await scenario.reconcilePaymentStatus({
+        req: { headers: {} },
+        payment: scenario.payment,
+      })
+
+      expect(result.status).toBe('success')
+      expect(scenario.mocks.query.update).toHaveBeenCalledWith(expect.objectContaining({
+        status: 'success',
+        provider_trade_no: '202606082200000001',
+        failure_reason: null,
+      }))
+      expect(scenario.mocks.setReportUnlocked).toHaveBeenCalledWith('user-1', true, 'payment')
+    } finally {
+      scenario.restore()
     }
   })
 

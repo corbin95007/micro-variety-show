@@ -7,7 +7,6 @@ import {
   reconcileQixiangPaymentStatus,
   verifyQixiangSignature,
 } from '../../_lib/payment.js'
-import { attachRequestId, logApiError } from '../../_lib/errors.js'
 
 function sendNotifyText(res, statusCode, text) {
   res.status(statusCode)
@@ -26,8 +25,6 @@ function normalizeQueryObject(query) {
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return sendNotifyText(res, 405, 'fail')
-
-  const requestId = attachRequestId(req, res)
 
   try {
     const notifyPayload = normalizeQueryObject(req.query)
@@ -83,14 +80,7 @@ export default async function handler(req, res) {
 
     return sendNotifyText(res, 200, 'success')
   } catch (error) {
-    logApiError('Payqixiang notify processing failed:', {
-      req,
-      requestId,
-      error,
-      context: {
-        safeMessage: getPaymentRuntimeErrorMessage(error, '七相异步通知处理失败'),
-      },
-    })
+    console.error(getPaymentRuntimeErrorMessage(error, '七相异步通知处理失败'))
     return sendNotifyText(res, 500, 'fail')
   }
 }

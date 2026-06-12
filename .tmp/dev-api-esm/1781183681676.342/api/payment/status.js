@@ -7,14 +7,6 @@ import {
   reconcilePaymentStatus,
   toClientPayment,
 } from '../_lib/payment.js'
-import {
-  attachRequestId,
-  handleApiError,
-  sendBadRequest,
-  sendError,
-  sendRateLimited,
-  sendUnauthorized,
-} from '../_lib/errors.js'
 import { consumeTokenBuckets } from '../_lib/rate-limit.js'
 import { getUserId } from '../_lib/supabase.js'
 import { getUnlockDecision } from '../_lib/unlock.js'
@@ -87,30 +79,22 @@ async function consumePaymentStatusRateLimit({ req, userId, payment }) {
   return consumeTokenBuckets(buildPaymentStatusRateLimitBuckets({ req, userId, payment }))
 }
 
-function sendPaymentRateLimited(res, rateLimit, requestId) {
-  return sendRateLimited(res, {
-    requestId,
-    message: '请求过于频繁，请稍后再试',
-    type: 'payment_status_rate_limited',
-    retryAfterSeconds: rateLimit?.retryAfterSeconds,
-    extra: {
-      ok: false,
-    },
+function sendRateLimited(res, rateLimit) {
+  const retryAfterSeconds = Math.max(1, Number(rateLimit?.retryAfterSeconds || 60))
+  res.setHeader?.('Retry-After', String(retryAfterSeconds))
+  return res.status(429).json({
+    ok: false,
+    error: 'rate_limited',
+    retry_after: retryAfterSeconds,
   })
 }
 
 export default async function handler(req, res) {
-  const requestId = attachRequestId(req, res)
-  if (req.method !== 'GET') {
-    return sendError(res, 405, '请求方法不支持', {
-      type: 'method_not_allowed',
-      requestId,
-    })
-  }
+  if (req.method !== 'GET') return res.status(405).end()
 
   try {
     const userId = await getUserId(req)
-    if (!userId) return sendUnauthorized(res, { requestId })
+    if (!userId) return res.status(401).json({ error: '未登录' })
 
     const paymentId = getSingleQueryValue(req.query.payment_id)
     const providerOrderNo = getSingleQueryValue(req.query.provider_order_no)
@@ -118,10 +102,7 @@ export default async function handler(req, res) {
     const latest = latestFlag === '1' || latestFlag === 'true'
 
     if (!paymentId && !providerOrderNo && !latest) {
-      return sendBadRequest(res, '缺少支付单标识', {
-        requestId,
-        type: 'missing_payment_identifier',
-      })
+      return res.status(400).json({ error: '缺少支付单标识' })
     }
 
     const payment = paymentId || providerOrderNo
@@ -139,16 +120,13 @@ export default async function handler(req, res) {
         })
       }
 
-      return sendError(res, 404, '支付单不存在', {
-        type: 'payment_not_found',
-        requestId,
-      })
+      return res.status(404).json({ error: '支付单不存在' })
     }
 
     if (isQixiangPendingPayment(payment)) {
       const rateLimit = await consumePaymentStatusRateLimit({ req, userId, payment })
       if (!rateLimit.allowed) {
-        return sendPaymentRateLimited(res, rateLimit, requestId)
+        return sendRateLimited(res, rateLimit)
       }
     }
 
@@ -164,14 +142,6 @@ export default async function handler(req, res) {
       unlock_method: decision?.method ?? null,
     })
   } catch (error) {
-    return handleApiError(req, res, error, {
-      requestId,
-      logLabel: 'Failed to load payment status:',
-      message: '支付状态查询失败，请稍后再试',
-      type: 'payment_status_failed',
-      context: {
-        safeMessage: getPaymentRuntimeErrorMessage(error, '支付状态查询失败'),
-      },
-    })
+    return res.status(500).json({ error: getPaymentRuntimeErrorMessage(error, '支付状态查询失败') })
   }
 }

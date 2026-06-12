@@ -36,6 +36,11 @@ export function formatRequestError(error, fallbackMessage) {
   return error instanceof Error ? error.message : fallbackMessage
 }
 
+function appendRequestId(message, requestId) {
+  if (!requestId) return message
+  return `${message}（错误编号：${requestId}）`
+}
+
 export async function parseApiResponse(resp, options = {}) {
   const {
     fallbackMessage = '请求失败，请稍后再试',
@@ -59,7 +64,10 @@ export async function parseApiResponse(resp, options = {}) {
     }
 
     if (parsedBody && typeof parsedBody === 'object') {
-      throw new Error(parsedBody.error || parsedBody.message || fallbackMessage)
+      throw new Error(appendRequestId(
+        parsedBody.error || parsedBody.message || fallbackMessage,
+        parsedBody.requestId
+      ))
     }
 
     if (isHtml) {

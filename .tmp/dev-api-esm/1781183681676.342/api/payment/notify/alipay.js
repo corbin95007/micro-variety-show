@@ -11,7 +11,6 @@ import {
   updatePaymentRecord,
   verifyAlipaySignature,
 } from '../../_lib/payment.js'
-import { attachRequestId, logApiError } from '../../_lib/errors.js'
 import { setReportUnlocked } from '../../_lib/unlock.js'
 
 function sendNotifyText(res, statusCode, text) {
@@ -22,8 +21,6 @@ function sendNotifyText(res, statusCode, text) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return sendNotifyText(res, 405, 'fail')
-
-  const requestId = attachRequestId(req, res)
 
   try {
     const notifyPayload = await parseAlipayNotifyPayload(req)
@@ -106,14 +103,7 @@ export default async function handler(req, res) {
     await updatePaymentRecord(payment.id, baseFields)
     return sendNotifyText(res, 200, 'success')
   } catch (error) {
-    logApiError('Alipay notify processing failed:', {
-      req,
-      requestId,
-      error,
-      context: {
-        safeMessage: getPaymentRuntimeErrorMessage(error, '支付宝异步通知处理失败'),
-      },
-    })
+    console.error(getPaymentRuntimeErrorMessage(error, '支付宝异步通知处理失败'))
     return sendNotifyText(res, 500, 'fail')
   }
 }

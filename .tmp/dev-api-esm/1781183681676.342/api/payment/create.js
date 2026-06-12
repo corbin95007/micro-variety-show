@@ -14,22 +14,15 @@ import {
   transitionPaymentStatus,
   updatePaymentRecord,
 } from '../_lib/payment.js'
-import { attachRequestId, handleApiError, sendConflict, sendError, sendUnauthorized } from '../_lib/errors.js'
 import { getUserId } from '../_lib/supabase.js'
 import { getUnlockDecision } from '../_lib/unlock.js'
 
 export default async function handler(req, res) {
-  const requestId = attachRequestId(req, res)
-  if (req.method !== 'POST') {
-    return sendError(res, 405, '请求方法不支持', {
-      type: 'method_not_allowed',
-      requestId,
-    })
-  }
+  if (req.method !== 'POST') return res.status(405).end()
 
   try {
     const userId = await getUserId(req)
-    if (!userId) return sendUnauthorized(res, { requestId })
+    if (!userId) return res.status(401).json({ error: '未登录' })
 
     const {
       provider = PAYMENT_PROVIDER.ALIPAY,
@@ -41,10 +34,7 @@ export default async function handler(req, res) {
     const unlockDecision = await getUnlockDecision(userId)
 
     if (unlockDecision.unlocked) {
-      return sendConflict(res, '你已完成购买，无需重复支付', {
-        requestId,
-        type: 'payment_already_unlocked',
-      })
+      return res.status(409).json({ error: '你已完成购买，无需重复支付' })
     }
 
     const providerOrderNo = generateProviderOrderNo(normalizedProvider)
@@ -109,14 +99,6 @@ export default async function handler(req, res) {
       payment_action: paymentAction,
     })
   } catch (error) {
-    return handleApiError(req, res, error, {
-      requestId,
-      logLabel: 'Failed to create payment:',
-      message: '创建支付单失败，请稍后再试',
-      type: 'payment_create_failed',
-      context: {
-        safeMessage: getPaymentRuntimeErrorMessage(error, '创建支付单失败'),
-      },
-    })
+    return res.status(500).json({ error: getPaymentRuntimeErrorMessage(error, '创建支付单失败') })
   }
 }
